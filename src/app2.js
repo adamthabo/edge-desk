@@ -21,7 +21,7 @@
       if (!dot) return;
       dot.className = 'dot ' + (h.status === 'live' ? 'live' : h.status === 'stale' ? 'stale' : h.status === 'sim' ? 'sim' : h.status === 'off' ? 'off' : '');
       txt.textContent = h.text || '';
-      src.textContent = S.source === 'relay' ? ((S.sameOrigin ? 'Live relay' : 'Relay') + (S.settings.env === 'demo' ? ' · demo' : '')) : S.source === 'direct' ? 'Direct' : S.source === 'sim' ? 'Simulated data' : 'No source';
+      src.textContent = S.source === 'relay' ? ((S.sameOrigin ? 'Live relay' : 'Relay') + (S.settings.env === 'demo' ? ' · demo' : '')) : S.source === 'direct' ? 'Direct' : S.source === 'sim' ? (S.ctx === 'artifact' ? 'Demo copy' : 'Simulated data') : 'No source';
       src.className = 'chip' + (S.source === 'sim' ? ' warn' : '');
       const e = h.exchange;
       ex.textContent = e ? (e.trading_active ? 'Exchange open' : (e.exchange_active ? 'Trading paused' : 'Exchange closed')) : '';
@@ -110,12 +110,14 @@
       else list.innerHTML = shown.map(o => this.oppCard(o)).join('');
       this.renderBrief();
     },
+    liveUrl() { return (window.ED_LIVE_URL || S.settings.liveUrl || '').trim(); },
     sourceBanner() {
       if (S.mode === 'sim') {
-        const why = S.ctx === 'artifact'
-          ? 'This copy runs inside Claude, which keeps pages from calling outside APIs, so the markets below are generated for demonstration. The live version is the same app served from your own free Cloudflare Worker; Setup has the two-minute recipe.'
-          : esc(S.health.simReason || 'No live source') + '. Everything below is generated for demonstration; the live version runs through the small relay described in Setup.';
-        return '<div class="banner warn"><div><p><b>Simulated data.</b> ' + why + '</p><div class="actions"><button class="btn sm primary" data-act="nav" data-v="setup">Go live</button></div></div></div>';
+        const live = this.liveUrl();
+        if (S.ctx === 'artifact') {
+          return '<div class="banner warn"><div><p><b>Demo copy.</b> This page runs inside Claude, which does not let pages call outside servers, so these markets are generated and nothing here is live. ' + (live ? 'Your live desk, with real Kalshi prices, is at <b>' + esc(live.replace(/^https?:\/\//, '')) + '</b>.' : 'The live version is the same app served from your own free Cloudflare Worker; Setup has the two-minute recipe.') + '</p><div class="actions">' + (live ? '<a class="btn sm primary" href="' + esc(live) + '" target="_blank" rel="noopener">Open the live desk</a>' : '<button class="btn sm primary" data-act="nav" data-v="setup">Go live</button>') + '</div></div></div>';
+        }
+        return '<div class="banner warn"><div><p><b>Simulated data.</b> ' + esc(S.health.simReason || 'No live source') + '. Everything below is generated for demonstration; the live version runs through the small relay described in Setup.</p><div class="actions"><button class="btn sm primary" data-act="nav" data-v="setup">Go live</button></div></div></div>';
       }
       if (S.health.status === 'stale') return '<div class="banner danger"><div><p><b>Data is stale.</b> ' + esc(S.health.lastErr || 'The relay stopped answering') + '. Polling continues; prices shown may be old.</p></div></div>';
       if (S.mode === 'live' && S.universe.loading) return '<div class="banner"><div><p><b>Loading the market universe</b> · ' + S.universe.markets.size.toLocaleString() + ' markets so far. Signals refine as more pages arrive.</p></div></div>';
@@ -496,7 +498,7 @@
       const statusLine = S.mode === 'live' ? '<span class="dot live"></span> Live through ' + (S.source === 'relay' ? (S.sameOrigin ? 'this site\'s built-in relay' : 'your relay at ' + esc(Engine.relayLabel())) : 'a direct connection') + (s.env === 'demo' ? ' (demo exchange)' : '') : '<span class="dot sim"></span> Simulated data' + (S.health.lastErr && S.ctx !== 'artifact' ? ' · last error: ' + esc(S.health.lastErr) : '');
       const recipe = '<ol class="steps"><li>Create a free Cloudflare account, then open <b>Workers &amp; Pages → Create → Start with Hello World</b> and give the worker a name such as <code>edge-desk</code>.</li><li>Replace the editor contents with the <code>edge-desk.worker.js</code> file from this chat and tap <b>Deploy</b>. (From a terminal, <code>npx wrangler deploy</code> next to the included <code>wrangler.toml</code> does the same.)</li><li>Open the worker\'s URL, which looks like <code>https://edge-desk.yourname.workers.dev</code>. That page is this app with live Kalshi quotes, on any device. Optional: a worker variable named <code>RELAY_KEY</code> locks the relay to copies that know the key.</li></ol>';
       let guide = '';
-      if (S.ctx === 'artifact') guide = '<div style="margin-top:12px"><p class="small" style="margin:0 0 10px"><b>Why this copy is simulated.</b> Pages inside Claude cannot call outside APIs, and Kalshi\'s API refuses browser requests anyway (no CORS headers). The live version is the same app served from your own free Cloudflare Worker, which also relays Kalshi\'s public, read-only market data. It never holds an API key and cannot trade.</p>' + recipe + '</div>';
+      if (S.ctx === 'artifact') guide = '<div style="margin-top:12px">' + (this.liveUrl() ? '<p class="small" style="margin:0 0 10px"><b>Your live desk:</b> <a href="' + esc(this.liveUrl()) + '" target="_blank" rel="noopener">' + esc(this.liveUrl().replace(/^https?:\/\//, '')) + '</a>. It is the same app served from your Cloudflare Worker, with real Kalshi prices.</p>' : '') + '<p class="small" style="margin:0 0 10px"><b>Why this copy is a demo.</b> Pages inside Claude cannot call outside APIs, and Kalshi\'s API refuses browser requests anyway (no CORS headers). The live version runs from a free Cloudflare Worker, which also relays Kalshi\'s public, read-only market data. It never holds an API key and cannot trade.</p>' + (this.liveUrl() ? '' : recipe) + '</div>';
       else if (S.mode !== 'live' && !relay) guide = '<div style="margin-top:12px"><p class="small" style="margin:0 0 10px"><b>Go live in about two minutes.</b> Kalshi\'s API refuses requests that carry a browser Origin, so Edge Desk reads through a tiny relay that strips it, adds CORS headers and caches responses for a few seconds. The relay only forwards public read-only market data.</p>' + recipe + '<p class="small" style="margin:10px 0 0">Prefer to keep using this file? Paste the worker URL into the Relay URL field below and tap <b>Reconnect</b>.</p></div>';
       conn.innerHTML = '<div class="card" style="margin-bottom:16px"><div class="row" style="justify-content:space-between"><div class="row">' + statusLine + '</div><div class="row">' + (S.ctx === 'artifact' ? '' : '<button class="btn sm" data-act="testconn">Test connection</button>') + '<button class="btn sm primary" data-act="reconnect">Reconnect</button></div></div><div id="conn-result" class="small" style="margin-top:8px"></div>' + guide + '</div>';
       const field = (id, labelTxt, inputHtml, help) => '<div class="field"><label for="' + id + '">' + labelTxt + '</label>' + inputHtml + (help ? '<div class="help">' + help + '</div>' : '') + '</div>';

@@ -1,3 +1,0 @@
-# Optional. Copy to .dev.vars for local `npx wrangler dev`, or set as Worker variables in the dashboard.
-RELAY_KEY=
-ALLOWED_ORIGIN=

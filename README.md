@@ -14,7 +14,9 @@ A Kalshi market scanner, live trade tape, order books, fee-aware edge/Kelly math
 
 ## Optional settings (Worker variables)
 
-- `RELAY_KEY` — when set, the relay only answers requests carrying `?k=<key>`; the app's Setup view has a field for it.
+None are required. The page this Worker serves always talks to its own relay.
+
+- `RELAY_KEY` — when set, other sites (a copy of the page opened as a file, say) must send `?k=<key>`; the app's Setup view has a field for it. Requests from the page served by this Worker never need it.
 - `ALLOWED_ORIGIN` — lock CORS to one origin instead of `*`.
 
 ## What the relay does and does not do

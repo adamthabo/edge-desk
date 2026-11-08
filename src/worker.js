@@ -47,6 +47,14 @@ function corsHeaders(env, origin) {
     'Vary': 'Origin'
   };
 }
+function isSameOrigin(request, url) {
+  const sfs = request.headers.get('Sec-Fetch-Site');
+  if (sfs === 'same-origin') return true;
+  const hostOf = (v) => { try { return v ? new URL(v).host : ''; } catch (e) { return ''; } };
+  const origin = hostOf(request.headers.get('Origin'));
+  const referer = hostOf(request.headers.get('Referer'));
+  return (!!origin && origin === url.host) || (!origin && !!referer && referer === url.host);
+}
 function json(obj, status, extra) {
   return new Response(JSON.stringify(obj), { status: status || 200, headers: Object.assign({ 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, extra || {}) });
 }
@@ -97,7 +105,7 @@ export default {
 
     let path = url.pathname;
     if (path === '/' || path === '/index.html' || path === '/edge-desk.html') {
-      return new Response(PAGE, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } });
+      return new Response(PAGE, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff', 'referrer-policy': 'same-origin' } });
     }
     if (path === '/favicon.ico') return new Response(null, { status: 204 });
     if (path === '/health') return json({ ok: true, relay: 'edge-desk', time: new Date().toISOString() }, 200, cors);
@@ -105,7 +113,10 @@ export default {
     let bases = UPSTREAM.prod;
     if (path.startsWith('/demo/')) { bases = UPSTREAM.demo; path = path.slice(5); }
     if (!path.startsWith('/trade-api/v2/')) return json({ error: 'not found' }, 404, cors);
-    if (env && env.RELAY_KEY && url.searchParams.get('k') !== env.RELAY_KEY) return json({ error: 'relay key required' }, 401, cors);
+    // RELAY_KEY (optional) gates callers from OTHER sites. The Edge Desk page this worker serves is trusted on its own:
+    // browsers mark its requests Sec-Fetch-Site: same-origin (and send a same-origin Referer).
+    const key = env && typeof env.RELAY_KEY === 'string' ? env.RELAY_KEY.trim() : '';
+    if (key && url.searchParams.get('k') !== key && !isSameOrigin(request, url)) return json({ error: 'relay key required' }, 401, cors);
     path = path.slice('/trade-api/v2'.length).replace(/\/+$/, '');
     return relay(request, env, path, bases, cors);
   }

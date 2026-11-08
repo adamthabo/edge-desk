@@ -17,6 +17,9 @@
 
 const PAGE = __PAGE__;
 
+__DESK__
+
+
 const UPSTREAM = {
   prod: ['https://external-api.kalshi.com/trade-api/v2', 'https://api.elections.kalshi.com/trade-api/v2'],
   demo: ['https://external-api.demo.kalshi.co/trade-api/v2', 'https://demo-api.kalshi.co/trade-api/v2']
@@ -101,6 +104,7 @@ export default {
     const origin = request.headers.get('Origin') || '';
     const cors = corsHeaders(env, origin);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+    if (url.pathname === '/desk' || url.pathname.startsWith('/desk/')) return EdgeDeskAccount.deskRoute(request, env || {}, url, UPSTREAM, cors, isSameOrigin);
     if (request.method !== 'GET' && request.method !== 'HEAD') return json({ error: 'GET only' }, 405, cors);
 
     let path = url.pathname;
@@ -121,3 +125,4 @@ export default {
     return relay(request, env, path, bases, cors);
   }
 };
+export const __desk = EdgeDeskAccount;

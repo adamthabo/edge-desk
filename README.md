@@ -2,7 +2,7 @@
 
 A Kalshi market scanner, live trade tape, order books, fee-aware edge/Kelly math and a paper-trading desk, served from a single Cloudflare Worker. The Worker also relays Kalshi's public, read-only market-data API (Kalshi refuses browser requests directly), so the page works on any phone or desktop with no backend of your own.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/adamthabo/hello/tree/main/edge-desk)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/adamthabo/edge-desk)
 
 ## Deploy
 
@@ -14,10 +14,18 @@ A Kalshi market scanner, live trade tape, order books, fee-aware edge/Kelly math
 
 ## Optional settings (Worker variables)
 
-None are required. The page this Worker serves always talks to its own relay.
-
-- `RELAY_KEY` — when set, other sites (a copy of the page opened as a file, say) must send `?k=<key>`; the app's Setup view has a field for it. Requests from the page served by this Worker never need it.
+- `RELAY_KEY` — when set, the relay only answers requests carrying `?k=<key>`; the app's Setup view has a field for it.
 - `ALLOWED_ORIGIN` — lock CORS to one origin instead of `*`.
+
+## Real trading (optional)
+
+Add three secrets to the Worker (Settings → Variables and Secrets) and the Desk view gains your real Kalshi account: balance, positions, resting orders, and a real-money ticket with a confirmation step.
+
+- `KALSHI_KEY_ID` and `KALSHI_PRIVATE_KEY`: an API key from Kalshi → account settings → API Keys (Ed25519 or RSA; paste the whole PEM).
+- `DESK_PASSWORD`: a password you choose; the page asks for it once per device.
+- Optional `MAX_ORDER_CONTRACTS` (default 100) and `MAX_ORDER_DOLLARS` (default 100) cap any single order; `KALSHI_DEMO_KEY_ID` / `KALSHI_DEMO_PRIVATE_KEY` enable the demo exchange.
+
+The private key never leaves the Worker: it signs each request there, and the account routes answer only the page served by this Worker, with the password. Orders are sent as price-capped limit orders (fill-or-cancel by default) through Kalshi's V2 order endpoint.
 
 ## What the relay does and does not do
 

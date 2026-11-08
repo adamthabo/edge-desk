@@ -240,7 +240,18 @@
     },
 
     /* ----- desk ----- */
+    deskTab: 'paper',
     renderDesk() {
+      const tabs = $('desk-tabs');
+      if (tabs) {
+        const acct = window.EDAcct;
+        const liveLabel = acct && acct.st.unlocked ? 'Live account' : 'Live account';
+        tabs.innerHTML = '<div class="seg"><button data-act="desktab" data-s="paper"' + (this.deskTab === 'paper' ? ' class="on"' : '') + '>Paper</button><button data-act="desktab" data-s="live"' + (this.deskTab === 'live' ? ' class="on"' : '') + '>' + liveLabel + (acct && acct.st.unlocked ? ' <span class="dot live" style="width:6px;height:6px;margin-left:4px;vertical-align:middle"></span>' : '') + '</button></div>';
+      }
+      const paper = $('desk-paper'), live = $('desk-live');
+      if (paper) paper.hidden = this.deskTab !== 'paper';
+      if (live) live.hidden = this.deskTab !== 'live';
+      if (this.deskTab === 'live') { if (this.renderDeskLive) this.renderDeskLive(); return; }
       const d = S.desk; const v = Desk.value();
       const openPnl = v.positions - Object.values(d.positions).reduce((s, p) => s + p.cost, 0);
       const ret = d.start ? (v.equity - d.start) / d.start : 0;
@@ -381,11 +392,18 @@
       };
       out.innerHTML = box('yes') + box('no');
     },
+    ticketModeBar() {
+      const acct = window.EDAcct;
+      if (!acct || !acct.st.unlocked || !acct.envOk()) return '';
+      const real = !!S.sheet.ticket.real;
+      return '<div class="seg" style="margin-bottom:8px"><button data-act="tmode" data-s="paper"' + (!real ? ' class="on"' : '') + '>Paper</button><button data-act="tmode" data-s="real"' + (real ? ' class="on real-on"' : '') + '>Real money</button></div>';
+    },
     renderTicket() {
       const m = S.universe.markets.get(S.sel); const box = $('sh-ticket'); if (!m || !box) return;
       const t = S.sheet.ticket;
+      if (t.real && this.renderRealTicket) { this.renderRealTicket(m, box); return; }
       if (t.price === null) t.price = t.side === 'yes' ? (m.hasBid ? m.yb : 0.5) : (m.hasAsk ? U.round(1 - m.ya, 4) : 0.5);
-      box.innerHTML = '<div class="row" style="justify-content:space-between"><div class="seg"><button data-act="tside" data-s="yes"' + (t.side === 'yes' ? ' class="on"' : '') + '>YES</button><button data-act="tside" data-s="no"' + (t.side === 'no' ? ' class="on"' : '') + '>NO</button></div><div class="seg"><button data-act="ttype" data-s="market"' + (t.type === 'market' ? ' class="on"' : '') + '>Market</button><button data-act="ttype" data-s="limit"' + (t.type === 'limit' ? ' class="on"' : '') + '>Limit</button></div></div>' +
+      box.innerHTML = this.ticketModeBar() + '<div class="row" style="justify-content:space-between"><div class="seg"><button data-act="tside" data-s="yes"' + (t.side === 'yes' ? ' class="on"' : '') + '>YES</button><button data-act="tside" data-s="no"' + (t.side === 'no' ? ' class="on"' : '') + '>NO</button></div><div class="seg"><button data-act="ttype" data-s="market"' + (t.type === 'market' ? ' class="on"' : '') + '>Market</button><button data-act="ttype" data-s="limit"' + (t.type === 'limit' ? ' class="on"' : '') + '>Limit</button></div></div>' +
         '<div class="grid"><label>Contracts<input class="inp" id="tk-qty" type="number" min="1" step="1" value="' + esc(t.qty) + '"></label><label' + (t.type === 'limit' ? '' : ' hidden') + '>Limit price (¢)<input class="inp" id="tk-price" type="number" min="1" max="99" step="1" value="' + Math.round(t.price * 100) + '"></label></div>' +
         '<div class="preview" id="tk-preview"></div>' +
         '<button class="btn primary block" data-act="place">Place paper order</button>' +
@@ -395,6 +413,7 @@
     renderTicketPreview() {
       const m = S.universe.markets.get(S.sel); const pv = $('tk-preview'); if (!m || !pv) return;
       const t = S.sheet.ticket;
+      if (t.real) { if (this.renderRealPreview) this.renderRealPreview(m); return; }
       const qty = U.num(($('tk-qty') || {}).value, t.qty);
       const price = t.type === 'limit' ? U.num(($('tk-price') || {}).value, Math.round(t.price * 100)) / 100 : null;
       const p = Desk.preview(m, t.side, qty, t.type, price, S.sheet.book);
@@ -510,6 +529,8 @@
         '<div class="field-row">' + field('relayKey', 'Relay key (optional)', inp('relayKey', s.relayKey, 'type="password" autocomplete="off"'), 'Must match RELAY_KEY on the worker.') + field('env', 'Exchange', sel('env', s.env, [['prod', 'Production (real markets)'], ['demo', 'Demo exchange']]), 'The demo exchange has sparse, fake markets; useful for testing.') + '</div>' +
         field('dataMode', 'Mode', sel('dataMode', s.dataMode, [['auto', 'Auto (relay, then direct, then simulated)'], ['relay', 'Relay only'], ['direct', 'Direct only'], ['sim', 'Simulated data']]), '');
       $('setup-form').innerHTML = sourceFields +
+        '<h3 class="label" style="margin-top:8px">Real trading</h3>' +
+        '<div id="setup-account"></div>' +
         '<h3 class="label" style="margin-top:8px">Explanations</h3>' +
         field('explain', 'Plain-language explanations', sel('explain', s.explain === false ? '0' : '1', [['1', 'On (define terms, translate every signal)'], ['0', 'Off (just the numbers)']]), 'Turns the "In plain terms" notes and the tappable definitions on or off. The How it works guide is always available from the top bar.') +
         '<h3 class="label" style="margin-top:8px">Polling</h3>' +
@@ -524,7 +545,8 @@
         '<h3 class="label" style="margin-top:8px">Storage</h3>' +
         '<p class="small muted" style="margin:0">' + (Persist.cloud ? 'Your watchlist, paper desk and settings are saved to your Claude account and follow you across devices.' : 'Saved in this browser only. Open this page from the Claude app to sync across devices.') + '</p>' +
         '<div class="field"><label for="import-box">Import a desk export</label><textarea class="inp" id="import-box" rows="3" placeholder="Paste an export here"></textarea><div class="row"><button class="btn sm" data-act="import">Import</button></div></div>' +
-        '<div class="disclaimer">Edge Desk is an independent analysis tool and is not affiliated with Kalshi. It shows public market data and simulated paper trades. Nothing here is investment advice; event contracts can lose the entire amount risked.</div>';
+        '<div class="disclaimer">Edge Desk is an independent analysis tool and is not affiliated with Kalshi. It shows public market data, paper trades, and, when you connect your own API key, your own Kalshi account. Nothing here is investment advice; event contracts can lose the entire amount risked.</div>';
+      if (this.renderSetupAccount) this.renderSetupAccount();
     },
     applySetting(id, value) {
       const s = S.settings;
@@ -535,6 +557,7 @@
       else if (id === 'kelly') s.kelly = U.num(value, 0.25);
       else if (id === 'slim') s.slim = value === '1';
       else if (id === 'explain') { s.explain = value === '1'; Persist.save(); this.render(); if (S.sel && !$('sheet').hidden) this.renderSheet(); return; }
+      else if (id === 'env') { s.env = value; Persist.save(); if (window.EDAcct) { window.EDAcct.st.balance = null; window.EDAcct.st.positions = []; window.EDAcct.st.orders = []; window.EDAcct.st.fills = []; } const rb = document.querySelector('[data-act="reconnect"]'); if (rb) rb.click(); return; }
       else s[id] = value;
       Persist.save();
       if (id === 'minSpread' || id === 'takerRate' || id === 'rounding' || id === 'minArbAnn') Scanner.run();
@@ -645,7 +668,7 @@
     if (act === 'brief') { UI.aiBrief(); return; }
     if (act === 'briefstop') { if (S.scanner.briefCtl) S.scanner.briefCtl.abort(); return; }
     if (act === 'testconn') { UI.testConnection(); return; }
-    if (act === 'reconnect') { Engine.stop(); S.mode = 'boot'; S.source = 'none'; S.health.lastErr = ''; S.health.errors = 0; S.blocked = {}; S.universe = { events: new Map(), markets: new Map(), loadedAt: 0, pages: 0, loading: false }; S.tape = { trades: [], seen: new Set(), lastTs: 0, paused: S.tape.paused }; S.scanner.ops = []; S.scanner.brief = null; UI.closeSheet(); Engine.boot().then(() => UI.renderSetup()); return; }
+    if (act === 'reconnect') { Engine.stop(); S.mode = 'boot'; S.source = 'none'; S.health.lastErr = ''; S.health.errors = 0; S.blocked = {}; S.universe = { events: new Map(), markets: new Map(), loadedAt: 0, pages: 0, loading: false }; S.tape = { trades: [], seen: new Set(), lastTs: 0, paused: S.tape.paused }; S.scanner.ops = []; S.scanner.brief = null; UI.closeSheet(); Engine.boot().then(() => { UI.renderSetup(); if (window.EDAcct) { window.EDAcct.st.known = false; window.EDAcct.probe().then(() => { if (UI.onAccount) UI.onAccount(); }); } }); return; }
   });
   document.querySelectorAll('#nav button[data-nav]').forEach(b => b.addEventListener('click', () => UI.nav(b.dataset.nav)));
   $('sh-close').addEventListener('click', () => UI.closeSheet());
@@ -685,7 +708,7 @@
     const v = location.hash.replace('#', '');
     UI.nav(VIEWS.includes(v) ? v : 'scanner', false);
     UI.renderStatus();
-    Engine.boot();
+    Engine.boot().then(() => { if (window.EDAcct) window.EDAcct.probe().then(() => { if (UI.onAccount) UI.onAccount(); }); });
     // capabilities arrive later; light features up when they do
     Persist.initCloud().then(cloud => {
       if (cloud === null) return;

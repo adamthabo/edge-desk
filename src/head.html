@@ -285,6 +285,21 @@ textarea.inp { width: 100%; font-family: var(--font-mono); font-size: 12px; }
 details.rules summary { cursor: pointer; font-weight: 500; }
 details.rules p { white-space: pre-wrap; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
 
+/* real-money ticket */
+.realbox { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--down); border-radius: var(--radius); background: var(--down-soft); }
+.realbox .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.realbox label { display: grid; gap: 4px; font-size: 12px; color: var(--fg-2); }
+.realbox .preview { font-size: 13px; display: grid; gap: 3px; padding: 10px 12px; background: var(--bg-elev); border-radius: var(--radius); }
+.realbox .preview div { display: flex; justify-content: space-between; gap: 8px; }
+.realbox .plain { border-left-color: var(--down); }
+.seg button.real-on { background: var(--down); color: #fff; }
+.btn.danger-fill { background: var(--down); color: #fff; border-color: var(--down); font-weight: 600; }
+.btn.danger-fill:hover { opacity: 0.9; }
+.confirm { padding: 12px; border: 1px solid var(--down); border-radius: var(--radius); background: var(--bg-elev); display: grid; gap: 8px; font-size: 13.5px; line-height: 1.45; }
+.confirm.ok { border-color: var(--up); }
+.confirm p { margin: 0; }
+.confirm .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
 /* settings */
 .form { display: grid; gap: 14px; max-width: 640px; }
 .field { display: grid; gap: 5px; }

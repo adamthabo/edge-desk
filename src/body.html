@@ -46,14 +46,18 @@
   </section>
 
   <section class="view" id="view-desk" hidden>
-    <div class="view-head"><h2>Paper desk</h2><span class="sub">Practice account: pretend money, live prices, real fees</span></div>
-    <div class="section-hint" id="desk-hint"></div>
-    <div class="tiles" id="desk-tiles"></div>
-    <div class="chart-wrap"><canvas id="desk-equity" height="110"></canvas><div class="chart-tip" id="desk-equity-tip"></div></div>
-    <div class="section"><h3>Positions</h3><div id="desk-positions"></div></div>
-    <div class="section"><h3>Resting orders</h3><div id="desk-orders"></div></div>
-    <div class="section"><h3>Fills</h3><div id="desk-fills"></div></div>
-    <div class="section"><h3>Account</h3><div class="row" id="desk-account"></div></div>
+    <div class="view-head"><h2>Desk</h2><span class="sub">Paper practice account, and your real Kalshi account</span></div>
+    <div id="desk-tabs" style="margin-bottom:12px"></div>
+    <div id="desk-paper">
+      <div class="section-hint" id="desk-hint"></div>
+      <div class="tiles" id="desk-tiles"></div>
+      <div class="chart-wrap"><canvas id="desk-equity" height="110"></canvas><div class="chart-tip" id="desk-equity-tip"></div></div>
+      <div class="section"><h3>Positions</h3><div id="desk-positions"></div></div>
+      <div class="section"><h3>Resting orders</h3><div id="desk-orders"></div></div>
+      <div class="section"><h3>Fills</h3><div id="desk-fills"></div></div>
+      <div class="section"><h3>Account</h3><div class="row" id="desk-account"></div></div>
+    </div>
+    <div id="desk-live" hidden></div>
   </section>
 
   <section class="view" id="view-setup" hidden>

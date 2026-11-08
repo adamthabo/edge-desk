@@ -388,7 +388,7 @@
           out.push({
             kind: 'arb', sub: 'yes', score: 95 + Math.min(ann || 0, 10) * 5 + margin * 100 + Math.log10(1 + size),
             event: ev.ticker, tickers: yesLegs.map(m => m.ticker), title: ev.title || yesLegs[0].title,
-            margin: margin, sumAsk: sumAsk, fees: fees, size: size, legs: yesLegs.length, cost: cost, ann: ann, days: days,
+            margin: margin, sumAsk: sumAsk, fees: fees, size: size, legs: yesLegs.length, cost: cost, ann: ann, days: days, why: ex.why,
             headline: 'Buy the whole book: YES asks sum to ' + U.cents(sumAsk),
             math: 'Buy YES on all ' + yesLegs.length + ' legs for ' + U.cents(cost) + ' per set (fees in); exactly one pays $1. Margin ' + U.cents(margin) + '/set = ' + U.pct(margin / cost, 1) + ' on capital' + (ann !== null ? ', ' + U.pct(ann, 0) + ' annualized over ' + horizonText(days) : '') + '. Top-of-book size ' + U.compact(size) + ' sets.',
             note: 'Treated as a lock because ' + ex.why + '. Still read the rules: a void or an unexpected settlement convention breaks the set.'

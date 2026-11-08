@@ -10,7 +10,7 @@
   const DEFAULTS = {
     relayUrl: '', relayKey: '', env: 'prod', dataMode: 'auto', slim: false,
     pollTape: 4, pollMarkets: 10, pollBook: 3, universePages: isMobile() ? 4 : 8, universeRefreshMin: 15,
-    bankroll: 1000, kelly: 0.25, rounding: 'centicent', takerRate: 0.07, minSpread: 0.04, minArbAnn: 0.08, bigPrint: 500
+    bankroll: 1000, kelly: 0.25, rounding: 'centicent', takerRate: 0.07, minSpread: 0.04, minArbAnn: 0.08, bigPrint: 500, explain: true
   };
   // Where is this page running? Inside the Claude artifact viewer (outside network blocked), self-hosted on the
   // Edge Desk worker (same-origin relay), or opened as a plain file.
@@ -275,7 +275,7 @@
         UI.renderStatus();
         this.start();
       } else {
-        this.useSim(keyNeeded ? 'This site\'s relay asked for a key (RELAY_KEY is set on the Worker): paste it under Setup → Relay key, or remove the variable in Cloudflare' : relay ? 'The relay did not answer (' + (S.health.lastErr || 'no response').replace(/^Relay: /, '') + ')' : 'Kalshi blocks browser requests');
+        this.useSim(keyNeeded ? 'This site\'s relay asked for a key (RELAY_KEY is set on the Worker): paste it under Setup → Relay key, or remove the variable in Cloudflare' : relay ? 'The relay did not answer (' + (S.health.lastErr || 'no response').replace(/^Relay: /, '') + ')' : 'Kalshi\'s API refuses requests straight from a browser');
       }
     },
     useSim(reason) {

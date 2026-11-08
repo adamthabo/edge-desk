@@ -3,8 +3,10 @@
   'use strict';
   const { U, N, F, A } = window.ED;
   const { S, Persist, API, DS, Engine, Desk, Chart, Scanner, label, DEFAULTS, setHealth, noteError } = window.EDApp;
+  const P = window.EDPlain;
   const $ = (id) => document.getElementById(id);
   const esc = U.esc;
+  const T = (key, text) => P.term(key, text);
   const cssEsc = (s) => (window.CSS && typeof window.CSS.escape === 'function') ? window.CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&');
   const KINDS = { arb: 'Book arbitrage', yield: 'Near-certain yield', spread: 'Wide spread', mover: 'Mover', volume: 'Volume surge', longshot: 'Longshot zone' };
   const VIEWS = ['scanner', 'markets', 'tape', 'desk', 'setup'];
@@ -81,10 +83,19 @@
     },
 
     /* ----- scanner ----- */
+    seenGuide() { try { return localStorage.getItem('edgedesk.seenGuide') === '1'; } catch (e) { return true; } },
+    markGuideSeen() { try { localStorage.setItem('edgedesk.seenGuide', '1'); } catch (e) { /* ignore */ } },
+    renderPrimer() {
+      const box = $('scanner-primer'); if (!box) return;
+      if (this.seenGuide() || !P.on()) { box.innerHTML = ''; return; }
+      box.innerHTML = '<div class="primer"><h3>New to prediction markets? Two minutes is enough.</h3><p>Every market here is a yes-or-no question about the real world. A YES contract costs between 1¢ and 99¢ and pays $1 if the thing happens; the price is the crowd\'s estimate of the odds. Edge Desk watches thousands of these prices and points out the situations traders look for, in plain language, with a practice account so you can try ideas without risking a cent.</p><div class="actions"><button class="btn sm primary" data-act="guide">Read how it works</button><button class="btn sm" data-act="primerdismiss">Got it</button></div></div>';
+    },
     renderScanner() {
       const ops = S.scanner.ops, counts = Scanner.counts();
       const banner = $('scanner-banner');
       banner.innerHTML = this.sourceBanner();
+      this.renderPrimer();
+      $('scanner-hint').innerHTML = P.scannerPlain();
       const kinds = ['all', 'arb', 'yield', 'spread', 'mover', 'volume', 'longshot'];
       $('scanner-chips').innerHTML = kinds.map(k => '<button class="chip' + (S.scanner.kind === k ? ' on' : '') + '" data-act="skind" data-k="' + k + '">' + (k === 'all' ? 'All' : KINDS[k]) + ' <b>' + (counts[k] || 0) + '</b></button>').join('');
       const sub = $('scanner-sub');
@@ -103,7 +114,7 @@
       if (S.mode === 'sim') {
         const why = S.ctx === 'artifact'
           ? 'This copy runs inside Claude, which keeps pages from calling outside APIs, so the markets below are generated for demonstration. The live version is the same app served from your own free Cloudflare Worker; Setup has the two-minute recipe.'
-          : esc(S.health.simReason || '') + '. Kalshi\'s API refuses browser requests, so the live version runs through a small relay you deploy once (free). Everything below is generated for demonstration.';
+          : esc(S.health.simReason || 'No live source') + '. Everything below is generated for demonstration; the live version runs through the small relay described in Setup.';
         return '<div class="banner warn"><div><p><b>Simulated data.</b> ' + why + '</p><div class="actions"><button class="btn sm primary" data-act="nav" data-v="setup">Go live</button></div></div></div>';
       }
       if (S.health.status === 'stale') return '<div class="banner danger"><div><p><b>Data is stale.</b> ' + esc(S.health.lastErr || 'The relay stopped answering') + '. Polling continues; prices shown may be old.</p></div></div>';
@@ -129,11 +140,14 @@
       if (m0) actions += '<a class="btn sm ghost" href="' + this.kalshiUrl(m0) + '" target="_blank" rel="noopener">Kalshi</a>';
       const brief = S.scanner.brief && S.scanner.brief.items ? S.scanner.brief.items.find(b => b.key === this.opKey(o)) : null;
       const briefHtml = brief ? '<div class="small" style="padding:8px 10px;background:var(--bg-sunk);border-radius:var(--radius)"><b>Claude:</b> ' + esc(brief.take) + (brief.caution ? ' <span class="muted">' + esc(brief.caution) + '</span>' : '') + ' <span class="faint">(' + esc(brief.confidence || '') + ' confidence)</span></div>' : '';
+      const kp = P.KIND_PLAIN[o.kind];
+      const kindTip = kp ? '<button type="button" class="kind ' + o.kind + ' kindbtn" data-kind-tip="' + o.kind + '" aria-label="What is ' + KINDS[o.kind] + '?">' + KINDS[o.kind] + ' <span aria-hidden="true">?</span></button>' : '<span class="kind ' + o.kind + '">' + KINDS[o.kind] + '</span>';
       return '<div class="card opp" data-op="' + esc(this.opKey(o)) + '">' +
-        '<div class="opp-head"><span class="kind ' + o.kind + '">' + KINDS[o.kind] + '</span>' + (cat ? '<span class="faint small">' + esc(cat) + '</span>' : '') + (m0 && m0.close ? '<span class="faint small" style="margin-left:auto">closes ' + U.countdown(m0.close) + '</span>' : '') + '</div>' +
+        '<div class="opp-head">' + kindTip + (cat ? '<span class="faint small">' + esc(cat) + '</span>' : '') + (m0 && m0.close ? '<span class="faint small" style="margin-left:auto">' + T('closes', 'closes') + ' ' + U.countdown(m0.close) + '</span>' : '') + '</div>' +
         '<div class="title">' + esc(o.title) + '</div>' +
         '<div class="headline">' + esc(o.headline) + '</div>' +
         '<div class="math">' + esc(o.math) + '</div>' + legs +
+        P.opPlain(o, S.universe.markets) +
         '<div class="note">' + esc(o.note) + '</div>' + briefHtml +
         '<div class="actions">' + actions + '</div></div>';
     },
@@ -210,10 +224,11 @@
       const st = A.tapeStats(S.tape.trades, 600000);
       const tot = st.yesQty + st.noQty;
       const yesPct = tot ? st.yesQty / tot : 0.5;
+      const hint = $('tape-hint'); if (hint) hint.innerHTML = P.tapePlain();
       $('tape-stats').innerHTML =
-        '<div class="stat"><div class="label">Prints · 10 min</div><div class="v">' + st.n + '</div><div class="s">' + st.perMin.toFixed(1) + ' per minute</div></div>' +
-        '<div class="stat"><div class="label">Taker flow</div><div class="v"><span class="yes">' + U.pct(yesPct, 0) + ' YES</span></div><div class="flow"><i style="width:' + (yesPct * 100).toFixed(1) + '%"></i></div><div class="s">' + U.compact(st.yesQty) + ' vs ' + U.compact(st.noQty) + ' contracts</div></div>' +
-        '<div class="stat"><div class="label">Notional</div><div class="v">' + U.money(st.notional, { dec: 0 }) + '</div><div class="s">' + st.big + ' big print' + (st.big === 1 ? '' : 's') + ' (500+)</div></div>' +
+        '<div class="stat"><div class="label">' + T('print', 'Trades') + ' · 10 min</div><div class="v">' + st.n + '</div><div class="s">' + st.perMin.toFixed(1) + ' per minute</div></div>' +
+        '<div class="stat"><div class="label">' + T('flow', 'Taker flow') + '</div><div class="v"><span class="yes">' + U.pct(yesPct, 0) + ' YES</span></div><div class="flow"><i style="width:' + (yesPct * 100).toFixed(1) + '%"></i></div><div class="s">' + U.compact(st.yesQty) + ' vs ' + U.compact(st.noQty) + ' contracts</div></div>' +
+        '<div class="stat"><div class="label">' + T('notional', 'Dollars traded') + '</div><div class="v">' + U.money(st.notional, { dec: 0 }) + '</div><div class="s">' + st.big + ' big print' + (st.big === 1 ? '' : 's') + ' (' + U.compact(S.settings.bigPrint) + '+)</div></div>' +
         '<div class="stat"><div class="label">Most active</div><div class="s" style="margin-top:4px">' + (st.top.slice(0, 4).map(x => '<a href="#" data-act="open" data-t="' + esc(x.ticker) + '" class="mono">' + esc(x.ticker.length > 22 ? x.ticker.slice(0, 22) + '…' : x.ticker) + '</a> <span class="faint">' + U.compact(x.qty) + '</span>').join('<br>') || '—') + '</div></div>';
     },
     renderTape() {
@@ -227,11 +242,12 @@
       const d = S.desk; const v = Desk.value();
       const openPnl = v.positions - Object.values(d.positions).reduce((s, p) => s + p.cost, 0);
       const ret = d.start ? (v.equity - d.start) / d.start : 0;
+      const hint = $('desk-hint'); if (hint) hint.innerHTML = P.deskPlain();
       $('desk-tiles').innerHTML =
-        '<div class="tile"><div class="label">Equity</div><div class="v">' + U.money(v.equity) + '</div><div class="s ' + (ret >= 0 ? 'up' : 'down') + '">' + U.signed(ret * 100, 2) + '% since start</div></div>' +
-        '<div class="tile"><div class="label">Cash</div><div class="v">' + U.money(d.cash) + '</div><div class="s">' + U.money(v.positions) + ' in positions</div></div>' +
-        '<div class="tile"><div class="label">Open P&amp;L</div><div class="v ' + (openPnl >= 0 ? 'up' : 'down') + '">' + U.money(openPnl, { plus: true }) + '</div><div class="s">marked at the bid</div></div>' +
-        '<div class="tile"><div class="label">Realized</div><div class="v ' + (d.realized >= 0 ? 'up' : 'down') + '">' + U.money(d.realized, { plus: true }) + '</div><div class="s">' + U.money(d.fees) + ' paid in fees</div></div>';
+        '<div class="tile"><div class="label">' + T('equity', 'Equity') + '</div><div class="v">' + U.money(v.equity) + '</div><div class="s ' + (ret >= 0 ? 'up' : 'down') + '">' + U.signed(ret * 100, 2) + '% since start</div></div>' +
+        '<div class="tile"><div class="label">Cash</div><div class="v">' + U.money(d.cash) + '</div><div class="s">' + U.money(v.positions) + ' in ' + T('position', 'positions') + '</div></div>' +
+        '<div class="tile"><div class="label">Open P&amp;L</div><div class="v ' + (openPnl >= 0 ? 'up' : 'down') + '">' + U.money(openPnl, { plus: true }) + '</div><div class="s">' + T('marked', 'marked at the bid') + '</div></div>' +
+        '<div class="tile"><div class="label">Realized</div><div class="v ' + (d.realized >= 0 ? 'up' : 'down') + '">' + U.money(d.realized, { plus: true }) + '</div><div class="s">' + U.money(d.fees) + ' paid in ' + T('fee', 'fees') + '</div></div>';
       Chart.spark($('desk-equity'), $('desk-equity-tip'), d.equity);
       const keys = Object.keys(d.positions);
       $('desk-positions').innerHTML = keys.length ? '<div class="tablewrap"><table class="table"><thead><tr><th>Market</th><th class="r">Qty</th><th class="r">Avg cost</th><th class="r">Bid</th><th class="r">P&amp;L</th><th></th></tr></thead><tbody>' + keys.map(k => {
@@ -273,16 +289,18 @@
       let bookHtml = '';
       if (siblings.length) {
         const sumAsk = siblings.reduce((s, x) => s + (x.hasAsk ? x.ya : 1), 0), sumBid = siblings.reduce((s, x) => s + (x.hasBid ? x.yb : 0), 0);
-        bookHtml = '<div class="section" style="margin-top:0"><h3>One-winner book · ' + siblings.length + ' outcomes</h3><div class="legs small" style="display:grid;gap:3px">' + siblings.map(x => '<div style="display:flex;justify-content:space-between;gap:8px"><a href="#" data-act="open" data-t="' + esc(x.ticker) + '" class="truncate" style="max-width:62%">' + (x.ticker === m.ticker ? '<b>' : '') + esc(x.yesSub || x.title) + (x.ticker === m.ticker ? '</b>' : '') + '</a><span><span class="yes">' + (x.hasBid ? U.cents(x.yb) : '—') + '</span> / <span class="no">' + (x.hasAsk ? U.cents(x.ya) : '—') + '</span></span></div>').join('') +
-          '</div><div class="small muted" style="margin-top:6px">YES asks sum to <b>' + U.cents(sumAsk) + '</b> · YES bids sum to <b>' + U.cents(sumBid) + '</b>. Below 100¢ on asks (minus fees) means buying every YES locks a profit if one must win; above 100¢ on bids means selling every YES locks one.</div></div>';
+        const ex = A.exhaustive(siblings);
+        bookHtml = '<div class="section" style="margin-top:0"><h3>' + T('onewinner', 'One-winner book') + ' · ' + siblings.length + ' outcomes</h3><div class="legs small" style="display:grid;gap:3px">' + siblings.map(x => '<div style="display:flex;justify-content:space-between;gap:8px"><a href="#" data-act="open" data-t="' + esc(x.ticker) + '" class="truncate" style="max-width:62%">' + (x.ticker === m.ticker ? '<b>' : '') + esc(x.yesSub || x.title) + (x.ticker === m.ticker ? '</b>' : '') + '</a><span><span class="yes">' + (x.hasBid ? U.cents(x.yb) : '—') + '</span> / <span class="no">' + (x.hasAsk ? U.cents(x.ya) : '—') + '</span></span></div>').join('') +
+          '</div><div class="small muted" style="margin-top:6px">YES asks sum to <b>' + U.cents(sumAsk) + '</b> · YES bids sum to <b>' + U.cents(sumBid) + '</b>.' + (P.on() ? ' Since only one of these can win, the YES prices should add up to about $1. Bids above 100¢ mean buying NO on every outcome locks a profit; asks below 100¢ lock one only if the list is ' + T('exhaustive', 'exhaustive') + ' (here: ' + esc(ex.why) + ').' : '') + '</div></div>';
       }
       $('sh-body').innerHTML =
         '<div id="sh-quote"></div>' +
+        '<div id="sh-plain"></div>' +
         '<div class="facts" id="sh-facts"></div>' +
         '<div><div class="row" style="justify-content:space-between;margin-bottom:6px"><span class="label">Price history</span><div class="seg">' + ['1D', '1W', '1M', 'All'].map(r => '<button data-act="range" data-r="' + r + '"' + (S.sheet.range === r ? ' class="on"' : '') + '>' + r + '</button>').join('') + '</div></div><div class="chart-wrap"><canvas id="sh-chart" height="190"></canvas><div class="chart-tip" id="sh-chart-tip"></div></div><div class="faint small" id="sh-chart-note" style="margin-top:4px"></div></div>' +
-        '<div><div class="label" style="margin-bottom:6px">Order book</div>' + (S.blocked.book ? '<div class="empty">Kalshi\'s order book endpoint asked for authentication, so depth is hidden. Top-of-book bid, ask and size still update from the market record.</div>' : '<div class="chart-wrap"><canvas id="sh-depth" height="120"></canvas><div class="chart-tip" id="sh-depth-tip"></div></div><div class="ladder" id="sh-ladder" style="margin-top:8px"></div>') + '</div>' +
-        '<div class="section" style="margin-top:0"><h3>Edge calculator</h3><div class="calc" id="sh-calc"></div></div>' +
-        '<div class="section" style="margin-top:0"><h3>Paper ticket</h3><div class="ticket" id="sh-ticket"></div></div>' +
+        '<div><div class="label" style="margin-bottom:6px">' + T('book', 'Order book') + '</div>' + (S.blocked.book ? '<div class="empty">Kalshi\'s order book endpoint asked for authentication, so depth is hidden. Top-of-book bid, ask and size still update from the market record.</div>' : '<div class="chart-wrap"><canvas id="sh-depth" height="120"></canvas><div class="chart-tip" id="sh-depth-tip"></div></div><div class="ladder" id="sh-ladder" style="margin-top:8px"></div>' + (P.on() ? '<div class="faint small" style="margin-top:6px">Left: how many contracts people want to buy at each price (' + T('bid', 'bids') + '). Right: how many are for sale at each price (' + T('ask', 'offers') + '). Bigger bars mean more money waiting there.</div>' : '')) + '</div>' +
+        '<div class="section" style="margin-top:0"><h3>Edge calculator</h3>' + P.calcPlain() + '<div class="calc" id="sh-calc" style="margin-top:8px"></div></div>' +
+        '<div class="section" style="margin-top:0"><h3>Paper ticket</h3>' + P.ticketPlain() + '<div class="ticket" id="sh-ticket" style="margin-top:8px"></div></div>' +
         '<div class="section" style="margin-top:0"><h3>Claude\'s read</h3><div class="ai" id="sh-ai"></div></div>' +
         '<div class="section" style="margin-top:0"><h3>Recent trades</h3><div id="sh-trades"></div></div>' +
         bookHtml +
@@ -299,10 +317,11 @@
       const m = S.universe.markets.get(S.sel); if (!m || !$('sh-quote')) return;
       const d = (m.last !== null && m.prev !== null) ? m.last - m.prev : null;
       $('sh-quote').innerHTML = '<div class="quote">' +
-        '<div class="qbox yes' + (dir > 0 ? ' flash-up' : '') + '"><div class="l">Yes</div><div class="p">' + (m.hasAsk ? U.cents(m.ya) : '—') + '</div><div class="s">bid ' + (m.hasBid ? U.cents(m.yb) : '—') + ' · ' + U.compact(m.yaSize) + ' offered</div><button class="btn sm yes" style="margin-top:8px" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="yes">Buy YES</button></div>' +
-        '<div class="qbox no' + (dir < 0 ? ' flash-down' : '') + '"><div class="l">No</div><div class="p">' + (m.hasBid ? U.cents(1 - m.yb) : '—') + '</div><div class="s">bid ' + (m.hasAsk ? U.cents(1 - m.ya) : '—') + ' · ' + U.compact(m.ybSize) + ' offered</div><button class="btn sm no" style="margin-top:8px" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="no">Buy NO</button></div></div>';
+        '<div class="qbox yes' + (dir > 0 ? ' flash-up' : '') + '"><div class="l">' + T('yes', 'Yes') + '</div><div class="p">' + (m.hasAsk ? U.cents(m.ya) : '—') + '</div><div class="s">' + (P.on() && m.hasAsk ? 'about ' + U.pct(m.ya, 0) + ' likely · ' : '') + T('bid', 'bid') + ' ' + (m.hasBid ? U.cents(m.yb) : '—') + ' · ' + U.compact(m.yaSize) + ' offered</div><button class="btn sm yes" style="margin-top:8px" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="yes">Buy YES</button></div>' +
+        '<div class="qbox no' + (dir < 0 ? ' flash-down' : '') + '"><div class="l">' + T('no', 'No') + '</div><div class="p">' + (m.hasBid ? U.cents(1 - m.yb) : '—') + '</div><div class="s">' + (P.on() && m.hasBid ? 'about ' + U.pct(1 - m.yb, 0) + ' likely · ' : '') + T('bid', 'bid') + ' ' + (m.hasAsk ? U.cents(1 - m.ya) : '—') + ' · ' + U.compact(m.ybSize) + ' offered</div><button class="btn sm no" style="margin-top:8px" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="no">Buy NO</button></div></div>';
       const f = (k, v, cls) => '<div><div class="k">' + k + '</div><div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div></div>';
-      $('sh-facts').innerHTML = f('Last', U.cents(m.last)) + f('24h change', d === null ? '—' : (d > 0 ? '▲ ' : d < 0 ? '▼ ' : '') + U.cents(Math.abs(d)), d === null ? '' : d > 0 ? 'up' : d < 0 ? 'down' : '') + f('Spread', m.hasBid && m.hasAsk ? U.cents(m.ya - m.yb) : '—') + f('Volume', U.compact(m.vol)) + f('24h volume', U.compact(m.vol24)) + f('Open interest', U.compact(m.oi)) + f('Closes', U.dateShort(m.close)) + f('Expires', U.dateShort(m.exp));
+      $('sh-facts').innerHTML = f(T('last', 'Last'), U.cents(m.last)) + f(T('change24', '24h change'), d === null ? '—' : (d > 0 ? '▲ ' : d < 0 ? '▼ ' : '') + U.cents(Math.abs(d)), d === null ? '' : d > 0 ? 'up' : d < 0 ? 'down' : '') + f(T('spread', 'Spread'), m.hasBid && m.hasAsk ? U.cents(m.ya - m.yb) : '—') + f(T('volume', 'Volume'), U.compact(m.vol)) + f(T('volume24', '24h volume'), U.compact(m.vol24)) + f(T('oi', 'Open interest'), U.compact(m.oi)) + f(T('closes', 'Closes'), U.dateShort(m.close)) + f(T('expires', 'Expires'), U.dateShort(m.exp));
+      const plain = $('sh-plain'); if (plain) plain.innerHTML = P.marketPlain(m, S.universe.events.get(m.event));
       const ticketPv = $('sh-ticket'); if (ticketPv) this.renderTicketPreview();
       const calc = $('sh-calc'); if (calc && S.sheet.calcQ === null) this.renderCalc();
       else if (calc) this.renderCalcOut();
@@ -335,7 +354,7 @@
       box.innerHTML = '<div class="slider"><div class="row" style="justify-content:space-between"><span class="small muted">Your probability of YES</span><b id="calc-q-label">' + S.sheet.calcQ + '%</b></div><input type="range" id="calc-q" min="1" max="99" value="' + S.sheet.calcQ + '"></div>' +
         '<div class="row small muted" style="gap:14px"><label class="row" style="gap:6px">Bankroll <input class="inp" id="calc-bank" type="number" min="1" step="50" value="' + esc(S.settings.bankroll) + '" style="width:96px;padding:4px 6px"></label><label class="row" style="gap:6px">Kelly <select class="sel" id="calc-kelly" style="padding:4px 6px"><option value="1"' + (S.settings.kelly === 1 ? ' selected' : '') + '>Full</option><option value="0.5"' + (S.settings.kelly === 0.5 ? ' selected' : '') + '>Half</option><option value="0.25"' + (S.settings.kelly === 0.25 ? ' selected' : '') + '>Quarter</option><option value="0.1"' + (S.settings.kelly === 0.1 ? ' selected' : '') + '>Tenth</option></select></label></div>' +
         '<div class="evgrid" id="calc-out"></div>' +
-        '<div class="faint small">EV uses the taker price plus Kalshi\'s fee for one contract. Kelly size assumes your probability is exactly right, which it is not; fractional Kelly is the usual correction.</div>';
+        '<div class="faint small">' + T('ev', 'EV') + ' uses the taker price plus Kalshi\'s ' + T('fee', 'fee') + ' for one contract. ' + T('kelly', 'Kelly size') + ' assumes your probability is exactly right, which it is not; fractional Kelly is the usual correction.</div>';
       this.renderCalcOut();
     },
     renderCalcOut() {
@@ -354,9 +373,9 @@
         return '<div class="evbox"><div class="h ' + side + '">Buy ' + side.toUpperCase() + ' at ' + U.cents(price) + '</div>' +
           '<div class="big ' + (good ? 'up' : 'down') + '">' + (e.ev >= 0 ? '+' : '−') + U.cents(Math.abs(e.ev)) + ' <span class="small" style="font-weight:400">EV / contract</span></div>' +
           '<div>Return on cost <b class="' + (good ? 'up' : 'down') + '">' + U.signed(e.roi * 100, 1) + '%</b></div>' +
-          '<div>Breakeven belief <b>' + U.pct(e.breakeven, 1) + '</b></div>' +
-          '<div>Fee <b>' + U.cents(fee) + '</b></div>' +
-          (good ? '<div>Kelly ' + U.pct(e.kelly, 1) + ' → <b>' + sz.contracts + ' contracts</b> (' + U.money(sz.stake) + ')</div><button class="btn sm ' + side + '" style="margin-top:4px" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="' + side + '" data-qty="' + sz.contracts + '">Paper ' + sz.contracts + ' ' + side.toUpperCase() + '</button>' : '<div class="faint">No edge at this belief</div>') + '</div>';
+          '<div>' + T('breakeven', 'Breakeven') + ' belief <b>' + U.pct(e.breakeven, 1) + '</b></div>' +
+          '<div>' + T('fee', 'Fee') + ' <b>' + U.cents(fee) + '</b></div>' +
+          (good ? '<div>' + T('kelly', 'Kelly') + ' ' + U.pct(e.kelly, 1) + ' → <b>' + sz.contracts + ' contracts</b> (' + U.money(sz.stake) + ')</div><button class="btn sm ' + side + '" style="margin-top:4px" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="' + side + '" data-qty="' + sz.contracts + '">Paper ' + sz.contracts + ' ' + side.toUpperCase() + '</button>' : '<div class="faint">No edge at this belief</div>') + '</div>';
       };
       out.innerHTML = box('yes') + box('no');
     },
@@ -489,6 +508,8 @@
         '<div class="field-row">' + field('relayKey', 'Relay key (optional)', inp('relayKey', s.relayKey, 'type="password" autocomplete="off"'), 'Must match RELAY_KEY on the worker.') + field('env', 'Exchange', sel('env', s.env, [['prod', 'Production (real markets)'], ['demo', 'Demo exchange']]), 'The demo exchange has sparse, fake markets; useful for testing.') + '</div>' +
         field('dataMode', 'Mode', sel('dataMode', s.dataMode, [['auto', 'Auto (relay, then direct, then simulated)'], ['relay', 'Relay only'], ['direct', 'Direct only'], ['sim', 'Simulated data']]), '');
       $('setup-form').innerHTML = sourceFields +
+        '<h3 class="label" style="margin-top:8px">Explanations</h3>' +
+        field('explain', 'Plain-language explanations', sel('explain', s.explain === false ? '0' : '1', [['1', 'On (define terms, translate every signal)'], ['0', 'Off (just the numbers)']]), 'Turns the "In plain terms" notes and the tappable definitions on or off. The How it works guide is always available from the top bar.') +
         '<h3 class="label" style="margin-top:8px">Polling</h3>' +
         '<div class="field-row">' + field('pollTape', 'Tape every (s)', inp('pollTape', s.pollTape, 'type="number" min="2" max="60"'), '') + field('pollMarkets', 'Watched markets every (s)', inp('pollMarkets', s.pollMarkets, 'type="number" min="5" max="120"'), '') + '</div>' +
         '<div class="field-row">' + field('pollBook', 'Open market book every (s)', inp('pollBook', s.pollBook, 'type="number" min="2" max="60"'), '') + field('universePages', 'Universe pages', inp('universePages', s.universePages, 'type="number" min="1" max="60"'), 'Each page is 200 events with all their markets (a few MB). More pages widen the scan and slow the first load; pages render as they arrive.') + '</div>' +
@@ -511,6 +532,7 @@
       else if (id === 'minArbAnn') { const n = U.num(value); if (n === null) return; s.minArbAnn = Math.max(0, n) / 100; }
       else if (id === 'kelly') s.kelly = U.num(value, 0.25);
       else if (id === 'slim') s.slim = value === '1';
+      else if (id === 'explain') { s.explain = value === '1'; Persist.save(); this.render(); if (S.sel && !$('sheet').hidden) this.renderSheet(); return; }
       else s[id] = value;
       Persist.save();
       if (id === 'minSpread' || id === 'takerRate' || id === 'rounding' || id === 'minArbAnn') Scanner.run();
@@ -552,6 +574,40 @@
     function fallback() { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { UI.toast('Select and copy: ' + text); } ta.remove(); }
   }
 
+  /* glossary popover */
+  function showPop(anchor, title, body) {
+    const pop = $('pop');
+    pop.innerHTML = '<b>' + esc(title) + '</b>' + esc(body);
+    pop.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    const pw = Math.min(320, window.innerWidth - 32);
+    let left = U.clamp(r.left + r.width / 2 - pw / 2, 16, window.innerWidth - pw - 16);
+    pop.style.left = left + 'px'; pop.style.width = pw + 'px';
+    pop.style.top = '0px';
+    const ph = pop.offsetHeight;
+    let top = r.bottom + 8;
+    if (top + ph > window.innerHeight - 12) top = Math.max(8, r.top - ph - 8);
+    pop.style.top = top + 'px';
+    pop._anchor = anchor;
+  }
+  function hidePop() { const pop = $('pop'); if (pop && !pop.hidden) { pop.hidden = true; pop._anchor = null; } }
+  document.addEventListener('click', (ev) => {
+    const term = ev.target.closest('[data-term], [data-kind-tip]');
+    const pop = $('pop');
+    if (term) {
+      ev.preventDefault(); ev.stopPropagation();
+      if (pop._anchor === term && !pop.hidden) { hidePop(); return; }
+      if (term.dataset.term) { const g = P.GLOSSARY[term.dataset.term]; if (g) showPop(term, g.t, g.d); }
+      else { const kp = P.KIND_PLAIN[term.dataset.kindTip]; if (kp) showPop(term, KINDS[term.dataset.kindTip], kp.what + ' How it pays: ' + kp.win + ' How it loses: ' + kp.lose); }
+      return;
+    }
+    if (!ev.target.closest('#pop')) hidePop();
+  }, true);
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { hidePop(); if (!$('guide').hidden) $('guide').hidden = true; } });
+  $('guide').addEventListener('click', (ev) => { if (ev.target === $('guide')) $('guide').hidden = true; });
+  $('main').addEventListener('scroll', hidePop, { passive: true });
+  $('sh-body').addEventListener('scroll', hidePop, { passive: true });
+
   document.addEventListener('click', (ev) => {
     const el = ev.target.closest('[data-act]');
     if (!el) return;
@@ -578,6 +634,9 @@
     if (act === 'import') { try { const data = JSON.parse($('import-box').value); Persist.apply(data); Persist.save(); UI.toast('Imported'); UI.render(); } catch (e) { UI.toast('That is not a valid export'); } return; }
     if (act === 'copy') { copyText(el.dataset.text); return; }
     if (act === 'airead') { UI.aiRead(!!el.dataset.fresh); return; }
+    if (act === 'guide') { $('guide-body').innerHTML = P.guideHtml(); $('guide').hidden = false; $('guide-body').scrollTop = 0; UI.markGuideSeen(); UI.renderPrimer(); return; }
+    if (act === 'guideclose') { $('guide').hidden = true; return; }
+    if (act === 'primerdismiss') { UI.markGuideSeen(); UI.renderPrimer(); return; }
     if (act === 'copyread') { const m = S.universe.markets.get(S.sel); if (m) copyText(UI.readPrompt(m, false), 'Prompt copied. Paste it into a Claude chat.'); return; }
     if (act === 'copybrief') { const ops = UI.briefOps(); if (ops.length) copyText(UI.briefPrompt(ops, false), 'Prompt copied. Paste it into a Claude chat.'); return; }
     if (act === 'aistop') { if (S.sheet.aiCtl) S.sheet.aiCtl.abort(); return; }

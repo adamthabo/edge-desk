@@ -5,13 +5,16 @@
     <span class="chip" id="st-source">—</span>
     <span id="st-exchange" class="nowrap"></span>
     <span id="st-updated" class="nowrap faint"></span>
+    <button class="btn sm" data-act="guide" id="guide-btn">How it works</button>
   </div>
 </header>
 
 <main id="main">
   <section class="view" id="view-scanner">
     <div id="scanner-banner"></div>
+    <div id="scanner-primer"></div>
     <div class="view-head"><h2>Scanner</h2><span class="sub" id="scanner-sub">Opportunities across the loaded market universe</span></div>
+    <div class="section-hint" id="scanner-hint"></div>
     <div class="chips scroll" id="scanner-chips"></div>
     <div id="scanner-brief"></div>
     <div id="scanner-list" class="cards" style="margin-top:12px"></div>
@@ -31,7 +34,8 @@
   </section>
 
   <section class="view" id="view-tape" hidden>
-    <div class="view-head"><h2>Tape</h2><span class="sub">Every print on the exchange, newest first</span></div>
+    <div class="view-head"><h2>Tape</h2><span class="sub">Every trade on the exchange, newest first</span></div>
+    <div class="section-hint" id="tape-hint"></div>
     <div class="tape-stats" id="tape-stats"></div>
     <div class="toolbar">
       <div class="search"><input id="tape-filter" type="search" placeholder="Filter by ticker or title" autocomplete="off"></div>
@@ -42,7 +46,8 @@
   </section>
 
   <section class="view" id="view-desk" hidden>
-    <div class="view-head"><h2>Paper desk</h2><span class="sub">Simulated fills at live quotes, with Kalshi's fee schedule</span></div>
+    <div class="view-head"><h2>Paper desk</h2><span class="sub">Practice account: pretend money, live prices, real fees</span></div>
+    <div class="section-hint" id="desk-hint"></div>
     <div class="tiles" id="desk-tiles"></div>
     <div class="chart-wrap"><canvas id="desk-equity" height="110"></canvas><div class="chart-tip" id="desk-equity-tip"></div></div>
     <div class="section"><h3>Positions</h3><div id="desk-positions"></div></div>
@@ -80,3 +85,10 @@
 </aside>
 
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+<div class="modal" id="guide" hidden role="dialog" aria-modal="true" aria-labelledby="guide-title">
+  <div class="panel">
+    <div class="panel-head"><h2 id="guide-title">How Edge Desk works</h2><button class="btn sm" data-act="guideclose">Close</button></div>
+    <div class="panel-body" id="guide-body"></div>
+  </div>
+</div>
+<div class="pop" id="pop" hidden role="tooltip"></div>

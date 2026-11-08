@@ -72,6 +72,7 @@
     const d = Math.floor(s / 86400); s -= d * 86400;
     const h = Math.floor(s / 3600); s -= h * 3600;
     const m = Math.floor(s / 60);
+    if (d >= 365) return (d / 365).toFixed(d >= 3650 ? 0 : 1) + 'y';
     if (d >= 30) return Math.round(d / 30.4) + 'mo';
     if (d >= 2) return d + 'd ' + h + 'h';
     if (d === 1) return '1d ' + h + 'h';
@@ -317,55 +318,80 @@
     return info;
   };
 
+  // Does a set of one-winner legs cover every possible outcome? True when a catch-all leg exists
+  // ("Other", "Someone else", "None of the above") or when the legs are numeric buckets with both
+  // open ends ("48° or below" … "57° or above"). Candidate lists without a catch-all are NOT exhaustive.
+  const CATCHALL_RE = /\b(other|another|someone else|anyone else|none of|no one|nobody|neither|the field|any other|not listed)\b/i;
+  const LOW_RE = /\b(or below|or lower|or less|or fewer|or under|below|under|less than|at most)\b/i;
+  const HIGH_RE = /\b(or above|or higher|or more|or over|above|over|more than|greater than|at least)\b/i;
+  A.exhaustive = function (legs) {
+    const names = legs.map(m => m.yesSub || m.title || '');
+    if (names.some(n => CATCHALL_RE.test(n))) return { ok: true, why: 'a catch-all leg covers every other outcome' };
+    const st = legs.map(m => m.strikeType || '');
+    const lowStrike = st.some(s => s === 'less' || s === 'less_or_equal'), highStrike = st.some(s => s === 'greater' || s === 'greater_or_equal');
+    if (lowStrike && highStrike) return { ok: true, why: 'the buckets run from an open low end to an open high end' };
+    if (names.some(n => LOW_RE.test(n)) && names.some(n => HIGH_RE.test(n))) return { ok: true, why: 'the buckets run from an open low end to an open high end' };
+    return { ok: false, why: 'the listed outcomes are not exhaustive; an unlisted outcome can win' };
+  };
+
   // Scan the universe. universe = {events: Map, markets: Map}; returns array of opportunities sorted by priority.
   A.scan = function (universe, settings, seriesCache, now) {
     now = now || Date.now();
     settings = settings || {};
     const rounding = settings.rounding || 'centicent';
     const minSpread = settings.minSpread || 0.04;
+    const minArbAnn = settings.minArbAnn === undefined ? 0.08 : settings.minArbAnn; // annualized return floor for locked arbs
     const out = [];
     const mkts = universe.markets, evs = universe.events;
     const feeInfo = (m, ev) => A.feeInfoFor(m, ev, seriesCache && seriesCache[m.series], settings, now);
     const takerFee = (m, ev, price) => F.perContract(price, 'taker', feeInfo(m, ev), rounding);
+    const horizonDays = (legs) => { let t = 0; for (const m of legs) { const x = m.exp || m.close; if (x && x > t) t = x; } return t ? Math.max(0.05, (t - now) / 86400000) : null; };
+    const horizonText = (d) => d === null ? 'an unknown settlement date' : d < 1 ? Math.round(d * 24) + ' hours' : d < 60 ? Math.round(d) + ' days' : d < 365 ? Math.round(d / 30.4) + ' months' : (d / 365).toFixed(1) + ' years';
 
     // 1) One-winner books (mutually exclusive events)
     for (const ev of evs.values()) {
       if (!ev.mutEx || ev.markets.length < 2) continue;
       const legs = ev.markets.map(t => mkts.get(t)).filter(m => m && m.status === 'active' && m.type === 'binary');
       if (legs.length < 2) continue;
+      const days = horizonDays(legs);
       // Buy NO on every leg: profit when Σ yes_bid > 1 + fees. Safe under mutual exclusivity (at most one YES).
       const noLegs = legs.filter(m => m.hasBid);
       if (noLegs.length === legs.length) {
         const sumBid = noLegs.reduce((s, m) => s + m.yb, 0);
         const fees = noLegs.reduce((s, m) => s + takerFee(m, ev, 1 - m.yb), 0);
         const margin = sumBid - 1 - fees;
+        const cost = noLegs.length - sumBid + fees;
         const size = Math.min.apply(null, noLegs.map(m => m.ybSize || 0));
-        if (margin > 0.0005) {
+        const ann = days !== null && cost > 0 ? (margin / cost) * (365 / days) : null;
+        if (margin > 0.0005 && size >= 1 && (ann === null || ann >= minArbAnn || days <= 45)) {
           out.push({
-            kind: 'arb', sub: 'no', score: 100 + margin * 100 + Math.log10(1 + size),
+            kind: 'arb', sub: 'no', score: 100 + Math.min(ann || 0, 10) * 5 + margin * 100 + Math.log10(1 + size),
             event: ev.ticker, tickers: noLegs.map(m => m.ticker), title: ev.title || noLegs[0].title,
-            margin: margin, sumBid: sumBid, fees: fees, size: size, legs: noLegs.length,
+            margin: margin, sumBid: sumBid, fees: fees, size: size, legs: noLegs.length, cost: cost, ann: ann, days: days,
             headline: 'Sell the whole book: YES bids sum to ' + U.cents(sumBid),
-            math: 'Buy NO on all ' + noLegs.length + ' legs. Cost ' + U.cents(noLegs.length - sumBid) + ' for a ' + U.cents(noLegs.length - 1) + ' minimum payout. Margin ' + U.cents(margin) + '/set after ' + U.cents(fees) + ' fees. Top-of-book size ' + U.compact(size) + ' sets.',
-            note: 'Locked if at most one leg settles YES (Kalshi flags this event as mutually exclusive). Fills at the quoted bids only up to the shown size.'
+            math: 'Buy NO on all ' + noLegs.length + ' legs. Cost ' + U.cents(cost) + ' per set (fees in) for a ' + U.cents(noLegs.length - 1) + ' minimum payout. Margin ' + U.cents(margin) + '/set = ' + U.pct(margin / cost, 1) + ' on capital' + (ann !== null ? ', ' + U.pct(ann, 0) + ' annualized over ' + horizonText(days) : '') + '. Top-of-book size ' + U.compact(size) + ' sets.',
+            note: 'Locked if at most one leg settles YES (Kalshi flags this event as mutually exclusive); if none does, every NO pays and you do better. Fills at the quoted bids only up to the shown size.'
           });
         }
       }
-      // Buy YES on every leg: profit when Σ yes_ask < 1 − fees. Needs one leg to settle YES (exhaustive outcomes).
+      // Buy YES on every leg: profit when Σ yes_ask < 1 − fees. Only a lock when the legs are exhaustive.
       const yesLegs = legs.filter(m => m.hasAsk);
       if (yesLegs.length === legs.length) {
         const sumAsk = yesLegs.reduce((s, m) => s + m.ya, 0);
         const fees = yesLegs.reduce((s, m) => s + takerFee(m, ev, m.ya), 0);
         const margin = 1 - sumAsk - fees;
+        const cost = sumAsk + fees;
         const size = Math.min.apply(null, yesLegs.map(m => m.yaSize || 0));
-        if (margin > 0.0005) {
+        const ex = A.exhaustive(yesLegs);
+        const ann = days !== null && cost > 0 ? (margin / cost) * (365 / days) : null;
+        if (margin > 0.0005 && size >= 1 && ex.ok && (ann === null || ann >= minArbAnn || days <= 45)) {
           out.push({
-            kind: 'arb', sub: 'yes', score: 95 + margin * 100 + Math.log10(1 + size),
+            kind: 'arb', sub: 'yes', score: 95 + Math.min(ann || 0, 10) * 5 + margin * 100 + Math.log10(1 + size),
             event: ev.ticker, tickers: yesLegs.map(m => m.ticker), title: ev.title || yesLegs[0].title,
-            margin: margin, sumAsk: sumAsk, fees: fees, size: size, legs: yesLegs.length,
+            margin: margin, sumAsk: sumAsk, fees: fees, size: size, legs: yesLegs.length, cost: cost, ann: ann, days: days,
             headline: 'Buy the whole book: YES asks sum to ' + U.cents(sumAsk),
-            math: 'Buy YES on all ' + yesLegs.length + ' legs for ' + U.cents(sumAsk) + ' + ' + U.cents(fees) + ' fees; exactly one pays $1. Margin ' + U.cents(margin) + '/set. Top-of-book size ' + U.compact(size) + ' sets.',
-            note: 'Only locked if one of these outcomes must happen. If the event can settle with no YES (an unlisted outcome wins), the whole stake is lost. Check the rules before treating this as riskless.'
+            math: 'Buy YES on all ' + yesLegs.length + ' legs for ' + U.cents(cost) + ' per set (fees in); exactly one pays $1. Margin ' + U.cents(margin) + '/set = ' + U.pct(margin / cost, 1) + ' on capital' + (ann !== null ? ', ' + U.pct(ann, 0) + ' annualized over ' + horizonText(days) : '') + '. Top-of-book size ' + U.compact(size) + ' sets.',
+            note: 'Treated as a lock because ' + ex.why + '. Still read the rules: a void or an unexpected settlement convention breaks the set.'
           });
         }
       }

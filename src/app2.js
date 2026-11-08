@@ -496,6 +496,7 @@
         '<h3 class="label" style="margin-top:8px">Fees and sizing</h3>' +
         '<div class="field-row">' + field('rounding', 'Fee rounding', sel('rounding', s.rounding, [['centicent', 'Centicent ($0.0001, direct Kalshi accounts)'], ['cent', 'Whole cent (brokerage / FCM accounts)']]), '') + field('takerRate', 'Taker rate', inp('takerRate', s.takerRate, 'type="number" step="0.005" min="0" max="0.2"'), 'Kalshi\'s schedule: 0.07 × contracts × P × (1−P), rounded up. Series multipliers are read from the API.') + '</div>' +
         '<div class="field-row">' + field('kelly', 'Kelly fraction', sel('kelly', s.kelly, [['1', 'Full'], ['0.5', 'Half'], ['0.25', 'Quarter'], ['0.1', 'Tenth']]), '') + field('minSpread', 'Flag spreads from (¢)', inp('minSpread', Math.round(s.minSpread * 100), 'type="number" min="2" max="40"'), '') + '</div>' +
+        field('minArbAnn', 'Book arbitrage: minimum annualized return (%)', inp('minArbAnn', Math.round((s.minArbAnn === undefined ? 0.08 : s.minArbAnn) * 100), 'type="number" min="0" max="500"'), 'Locked books that settle within 45 days are always shown; longer-dated ones only when the margin, annualized over the time to settlement, clears this. Buy-the-book arbs are shown only when the legs are exhaustive (a catch-all leg, or buckets with open ends).') +
         field('bigPrint', 'Big print threshold (contracts)', inp('bigPrint', s.bigPrint, 'type="number" min="50" step="50"'), 'Prints at or above this size are highlighted on the tape.') +
         '<h3 class="label" style="margin-top:8px">Storage</h3>' +
         '<p class="small muted" style="margin:0">' + (Persist.cloud ? 'Your watchlist, paper desk and settings are saved to your Claude account and follow you across devices.' : 'Saved in this browser only. Open this page from the Claude app to sync across devices.') + '</p>' +
@@ -507,11 +508,12 @@
       const nums = ['pollTape', 'pollMarkets', 'pollBook', 'universePages', 'universeRefreshMin', 'takerRate', 'bigPrint'];
       if (nums.includes(id)) { const n = U.num(value); if (n === null) return; s[id] = n; }
       else if (id === 'minSpread') { const n = U.num(value); if (n === null) return; s.minSpread = n / 100; }
+      else if (id === 'minArbAnn') { const n = U.num(value); if (n === null) return; s.minArbAnn = Math.max(0, n) / 100; }
       else if (id === 'kelly') s.kelly = U.num(value, 0.25);
       else if (id === 'slim') s.slim = value === '1';
       else s[id] = value;
       Persist.save();
-      if (id === 'minSpread' || id === 'takerRate' || id === 'rounding') Scanner.run();
+      if (id === 'minSpread' || id === 'takerRate' || id === 'rounding' || id === 'minArbAnn') Scanner.run();
     },
     async testConnection() {
       const box = $('conn-result'); if (!box) return;

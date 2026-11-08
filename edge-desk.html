@@ -1,0 +1,2545 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style></head><body><title>Edge Desk</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..110,400..700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a one-screen trading desk. Phones: sticky header, scrolling view, bottom tab bar, full-screen market sheet.
+   Wide screens: left rail, view, 460px market panel. Typography does the hierarchy (Archivo widths); numbers are tabular. */
+:root {
+  --bg: #f4f4f2;
+  --bg-elev: #ffffff;
+  --bg-sunk: #ebebe7;
+  --bg-hover: #e9e9e5;
+  --fg: #141414;
+  --fg-2: #5a5a56;
+  --fg-3: #8d8d87;
+  --line: #d8d8d2;
+  --line-2: #e8e8e3;
+  --ink: #141414;
+  --ink-fg: #ffffff;
+  --yes: #2a78d6;
+  --yes-ink: #1f5fb0;
+  --yes-soft: rgba(42, 120, 214, 0.12);
+  --no: #e87ba4;
+  --no-ink: #b5366b;
+  --no-soft: rgba(232, 123, 164, 0.16);
+  --up: #1c8a4e;
+  --down: #b3261e;
+  --up-soft: rgba(28, 138, 78, 0.14);
+  --down-soft: rgba(179, 38, 30, 0.12);
+  --warn: #a46a0e;
+  --warn-soft: rgba(183, 121, 31, 0.14);
+  --live: #1c8a4e;
+  --shadow: 0 10px 30px rgba(20, 20, 20, 0.12);
+  --font-ui: 'Archivo', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 6px;
+  --gutter-l: max(16px, env(safe-area-inset-left, 0px));
+  --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131315; --bg-elev: #1c1c1f; --bg-sunk: #0e0e10; --bg-hover: #26262a;
+    --fg: #ececea; --fg-2: #a9a9a3; --fg-3: #74746f; --line: #2d2d32; --line-2: #222226;
+    --ink: #ececea; --ink-fg: #141416;
+    --yes: #3987e5; --yes-ink: #6fa9f1; --yes-soft: rgba(57, 135, 229, 0.18);
+    --no: #d55181; --no-ink: #ee86ae; --no-soft: rgba(213, 81, 129, 0.2);
+    --up: #3fbf78; --down: #e5726a; --up-soft: rgba(63, 191, 120, 0.16); --down-soft: rgba(229, 114, 106, 0.14);
+    --warn: #d9a441; --warn-soft: rgba(217, 164, 65, 0.16); --live: #3fbf78;
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131315; --bg-elev: #1c1c1f; --bg-sunk: #0e0e10; --bg-hover: #26262a;
+  --fg: #ececea; --fg-2: #a9a9a3; --fg-3: #74746f; --line: #2d2d32; --line-2: #222226;
+  --ink: #ececea; --ink-fg: #141416;
+  --yes: #3987e5; --yes-ink: #6fa9f1; --yes-soft: rgba(57, 135, 229, 0.18);
+  --no: #d55181; --no-ink: #ee86ae; --no-soft: rgba(213, 81, 129, 0.2);
+  --up: #3fbf78; --down: #e5726a; --up-soft: rgba(63, 191, 120, 0.16); --down-soft: rgba(229, 114, 106, 0.14);
+  --warn: #d9a441; --warn-soft: rgba(217, 164, 65, 0.16); --live: #3fbf78;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--font-ui); font-size: 14px; line-height: 1.4;
+  font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
+  display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: 1fr;
+  overflow: hidden;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--yes); outline-offset: 2px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+.mono { font-family: var(--font-mono); font-size: 0.92em; }
+.num { font-variant-numeric: tabular-nums; }
+.up { color: var(--up); } .down { color: var(--down); }
+.yes { color: var(--yes-ink); } .no { color: var(--no-ink); }
+.muted { color: var(--fg-2); } .faint { color: var(--fg-3); }
+.label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-2); font-stretch: 90%; font-weight: 600; }
+.small { font-size: 12px; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.right { text-align: right; }
+.nowrap { white-space: nowrap; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* header */
+#top {
+  grid-row: 1; grid-column: 1; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--bg); border-bottom: 1px solid var(--line);
+  padding-block: 10px 8px; padding-left: var(--gutter-l); padding-right: var(--gutter-r);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.brand { display: flex; align-items: baseline; gap: 8px; }
+.brand h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; font-stretch: 95%; }
+.brand .tag { font-size: 11px; color: var(--fg-2); letter-spacing: 0.04em; text-transform: uppercase; font-stretch: 90%; }
+.status { display: flex; align-items: center; gap: 10px; margin-left: auto; font-size: 12px; color: var(--fg-2); flex-wrap: wrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-3); display: inline-block; flex: none; }
+.dot.live { background: var(--live); animation: pulse 1.6s ease-in-out infinite; }
+.dot.stale { background: var(--warn); }
+.dot.off { background: var(--down); }
+.dot.sim { background: var(--yes); }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(28, 138, 78, 0.5); } 50% { box-shadow: 0 0 0 5px rgba(28, 138, 78, 0); } }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px; background: var(--bg-elev); color: var(--fg-2); white-space: nowrap; font-stretch: 95%; }
+.chip.on { background: var(--ink); color: var(--ink-fg); border-color: var(--ink); }
+.chip.warn { border-color: var(--warn); color: var(--warn); }
+button.chip:hover { background: var(--bg-hover); color: var(--fg); }
+button.chip.on:hover { background: var(--ink); color: var(--ink-fg); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chips.scroll { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.chips.scroll::-webkit-scrollbar { display: none; }
+
+/* main */
+#main { grid-row: 2; grid-column: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; -webkit-overflow-scrolling: touch; }
+.view { padding-block: 14px 28px; padding-left: var(--gutter-l); padding-right: var(--gutter-r); max-width: 1180px; }
+.view-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.view-head h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.view-head .sub { color: var(--fg-2); font-size: 13px; }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0 12px; }
+.search { flex: 1 1 220px; min-width: 0; display: flex; align-items: center; gap: 8px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 10px; }
+.search input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; }
+select.sel, input.inp, textarea.inp { background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); padding: 7px 9px; min-width: 0; max-width: 100%; }
+textarea.inp { width: 100%; font-family: var(--font-mono); font-size: 12px; }
+
+/* banner */
+.banner { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--yes); background: var(--bg-elev); border-radius: var(--radius); margin-bottom: 14px; }
+.banner.warn { border-left-color: var(--warn); }
+.banner.danger { border-left-color: var(--down); }
+.banner p { margin: 0; }
+.banner .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--bg-elev); color: var(--fg); font-weight: 500; font-size: 13px; line-height: 1.2; white-space: nowrap; text-decoration: none; }
+.btn:hover { background: var(--bg-hover); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.primary { background: var(--ink); color: var(--ink-fg); border-color: var(--ink); }
+.btn.primary:hover { opacity: 0.88; }
+.btn.yes { background: var(--yes); color: #fff; border-color: var(--yes); }
+.btn.no { background: var(--no); color: #fff; border-color: var(--no); }
+.btn.sm { padding: 4px 9px; font-size: 12px; }
+.btn.ghost { border-color: transparent; background: transparent; }
+.btn.ghost:hover { background: var(--bg-hover); }
+.btn.danger { color: var(--down); }
+.btn.block { width: 100%; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--bg-elev); }
+.seg button { border: 0; background: transparent; padding: 6px 10px; font-size: 12px; color: var(--fg-2); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: var(--ink); color: var(--ink-fg); }
+
+/* cards and lists */
+.card { background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+@media (max-width: 420px) { .cards { grid-template-columns: 1fr; } }
+.opp { display: grid; gap: 8px; }
+.opp-head { display: flex; gap: 8px; align-items: center; }
+.kind { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; padding: 2px 7px; border-radius: 3px; background: var(--bg-sunk); color: var(--fg-2); font-stretch: 90%; }
+.kind.arb { background: var(--up-soft); color: var(--up); }
+.kind.yield { background: var(--yes-soft); color: var(--yes-ink); }
+.kind.spread { background: var(--warn-soft); color: var(--warn); }
+.kind.mover { background: var(--bg-sunk); color: var(--fg); }
+.kind.volume { background: var(--bg-sunk); color: var(--fg-2); }
+.kind.longshot { background: var(--no-soft); color: var(--no-ink); }
+.opp .title { font-weight: 600; font-size: 14.5px; line-height: 1.3; }
+.opp .headline { font-size: 15px; font-weight: 600; letter-spacing: -0.005em; }
+.opp .math { color: var(--fg-2); font-size: 13px; }
+.opp .note { color: var(--fg-3); font-size: 12px; }
+.opp .legs { display: grid; gap: 2px; font-size: 12.5px; }
+.opp .legs div { display: flex; justify-content: space-between; gap: 8px; }
+.opp .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+
+.list { border-top: 1px solid var(--line); }
+.mrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line-2); cursor: pointer; }
+.mrow:hover { background: var(--bg-hover); }
+.mrow .t { font-weight: 500; line-height: 1.3; }
+.mrow .meta { color: var(--fg-3); font-size: 11.5px; display: flex; gap: 8px; flex-wrap: wrap; }
+.mrow .px { text-align: right; min-width: 64px; }
+.mrow .px .p { font-weight: 600; font-size: 15px; }
+.mrow .px .d { font-size: 11.5px; }
+.mrow .sides { display: flex; gap: 4px; }
+.pxbtn { padding: 5px 8px; border-radius: 4px; border: 1px solid var(--line); background: var(--bg-elev); font-size: 12px; min-width: 58px; text-align: center; }
+.pxbtn.yes { color: var(--yes-ink); border-color: var(--yes-soft); background: var(--yes-soft); }
+.pxbtn.no { color: var(--no-ink); border-color: var(--no-soft); background: var(--no-soft); }
+.flash-up { animation: flashUp 0.9s ease-out; } .flash-down { animation: flashDown 0.9s ease-out; }
+@keyframes flashUp { from { background-color: var(--up-soft); } to { background-color: transparent; } }
+@keyframes flashDown { from { background-color: var(--down-soft); } to { background-color: transparent; } }
+
+/* tape */
+.tape-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.stat { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev); }
+.stat .v { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.1; margin-top: 2px; }
+.stat .s { font-size: 11.5px; color: var(--fg-3); margin-top: 2px; }
+.flow { height: 8px; border-radius: 4px; background: var(--no-soft); overflow: hidden; margin-top: 6px; }
+.flow i { display: block; height: 100%; background: var(--yes); }
+.trow { display: grid; grid-template-columns: 62px minmax(0, 1fr) 58px 72px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line-2); font-size: 13px; cursor: pointer; }
+.trow .time { color: var(--fg-3); font-size: 11.5px; }
+.trow .tk { min-width: 0; }
+.trow .tk .n { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trow .tk .k { color: var(--fg-3); font-size: 11px; font-family: var(--font-mono); }
+.trow .side { font-weight: 600; font-size: 12px; }
+.trow .qty { text-align: right; font-weight: 500; }
+.trow.big .qty { font-weight: 700; }
+.trow.big { background: linear-gradient(90deg, var(--warn-soft), transparent 60%); }
+.trow.new { animation: slideIn 0.5s ease-out; }
+@keyframes slideIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+/* desk */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.tile { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev); }
+.tile .v { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.1; margin-top: 4px; }
+.tile .s { font-size: 12px; color: var(--fg-3); margin-top: 4px; }
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th { text-align: left; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-2); font-weight: 600; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); font-stretch: 90%; }
+.table td { padding: 8px 8px 8px 0; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+.table td.r, .table th.r { text-align: right; }
+.tablewrap { overflow-x: auto; }
+.section { margin-top: 22px; }
+.section h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-2); font-weight: 600; margin-bottom: 8px; font-stretch: 90%; }
+.empty { padding: 20px 14px; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--fg-2); font-size: 13px; }
+
+/* nav */
+#nav { grid-row: 3; grid-column: 1; display: flex; border-top: 1px solid var(--line); background: var(--bg); padding-left: var(--gutter-l); padding-right: var(--gutter-r); }
+#nav button { flex: 1; background: transparent; border: 0; padding: 9px 4px 8px; font-size: 11px; color: var(--fg-2); display: flex; flex-direction: column; align-items: center; gap: 3px; letter-spacing: 0.03em; text-transform: uppercase; font-weight: 600; font-stretch: 90%; }
+#nav button svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+#nav button.on { color: var(--fg); }
+#nav button .badge { position: absolute; }
+
+/* sheet (market panel) */
+#sheet { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex; flex-direction: column; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+#sheet .sheet-head { display: flex; align-items: flex-start; gap: 10px; padding: 12px var(--gutter-r) 10px var(--gutter-l); border-bottom: 1px solid var(--line); background: var(--bg); }
+#sheet .sheet-head h2 { font-size: 17px; font-weight: 600; line-height: 1.3; }
+#sheet .sheet-body { overflow-y: auto; flex: 1; min-height: 0; padding: 12px var(--gutter-r) 40px var(--gutter-l); display: grid; gap: 16px; align-content: start; }
+.quote { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.qbox { padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--bg-elev); }
+.qbox.yes { border-color: var(--yes-soft); background: var(--yes-soft); }
+.qbox.no { border-color: var(--no-soft); background: var(--no-soft); }
+.qbox .l { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; }
+.qbox.yes .l { color: var(--yes-ink); } .qbox.no .l { color: var(--no-ink); }
+.qbox .p { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; margin-top: 2px; }
+.qbox .s { font-size: 11.5px; color: var(--fg-2); margin-top: 2px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px 12px; font-size: 12.5px; }
+.facts .k { color: var(--fg-3); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; font-stretch: 90%; }
+.facts .v { font-weight: 500; }
+.chart-wrap { position: relative; }
+.chart-wrap canvas { width: 100%; display: block; border-radius: var(--radius); }
+.chart-tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--ink-fg); font-size: 11.5px; padding: 4px 7px; border-radius: 4px; white-space: nowrap; transform: translate(-50%, -100%); display: none; z-index: 2; }
+.ladder { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12.5px; }
+.ladder .col h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; }
+.ladder .col.yes h4 { color: var(--yes-ink); } .ladder .col.no h4 { color: var(--no-ink); }
+.lrow { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 3px 4px; position: relative; border-radius: 3px; }
+.lrow .bar { position: absolute; inset: 0; border-radius: 3px; opacity: 0.9; z-index: 0; }
+.col.yes .lrow .bar { background: var(--yes-soft); } .col.no .lrow .bar { background: var(--no-soft); }
+.lrow span { position: relative; z-index: 1; }
+.lrow .q { text-align: right; color: var(--fg-2); }
+.calc { display: grid; gap: 10px; }
+.calc .slider { display: grid; gap: 4px; }
+.calc input[type=range] { width: 100%; accent-color: var(--ink); }
+.evgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.evbox { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev); font-size: 12.5px; display: grid; gap: 3px; }
+.evbox .h { font-weight: 700; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.evbox .big { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.ticket { display: grid; gap: 10px; }
+.ticket .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ticket label { display: grid; gap: 4px; font-size: 12px; color: var(--fg-2); }
+.ticket .preview { font-size: 13px; display: grid; gap: 3px; padding: 10px 12px; background: var(--bg-sunk); border-radius: var(--radius); }
+.ticket .preview div { display: flex; justify-content: space-between; gap: 8px; }
+.ai { display: grid; gap: 10px; }
+.ai .band { position: relative; height: 10px; border-radius: 5px; background: var(--bg-sunk); margin: 10px 0 18px; }
+.ai .band .range { position: absolute; top: 0; bottom: 0; background: var(--yes-soft); border-radius: 5px; }
+.ai .band .mid { position: absolute; top: -3px; width: 4px; height: 16px; background: var(--yes); border-radius: 2px; transform: translateX(-50%); }
+.ai .band .mkt { position: absolute; top: -3px; width: 2px; height: 16px; background: var(--fg); transform: translateX(-50%); }
+.ai .band .lbl { position: absolute; top: 18px; font-size: 10.5px; color: var(--fg-3); transform: translateX(-50%); white-space: nowrap; }
+.ai ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+.ai .stance { display: inline-block; padding: 3px 8px; border-radius: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; background: var(--bg-sunk); }
+.ai .stance.lean_yes { background: var(--yes-soft); color: var(--yes-ink); }
+.ai .stance.lean_no { background: var(--no-soft); color: var(--no-ink); }
+.ai .verdict { font-size: 14px; font-weight: 500; }
+.ai .think { color: var(--fg-2); font-size: 13px; }
+details.rules summary { cursor: pointer; font-weight: 500; }
+details.rules p { white-space: pre-wrap; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
+
+/* settings */
+.form { display: grid; gap: 14px; max-width: 640px; }
+.field { display: grid; gap: 5px; }
+.field label { font-size: 12px; color: var(--fg-2); font-weight: 500; }
+.field .help { font-size: 12px; color: var(--fg-3); }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 480px) { .field-row { grid-template-columns: 1fr; } }
+.steps { counter-reset: s; display: grid; gap: 10px; padding-left: 0; list-style: none; margin: 0; }
+.steps li { position: relative; padding-left: 30px; font-size: 13px; }
+.steps li::before { counter-increment: s; content: counter(s); position: absolute; left: 0; top: 0; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--ink-fg); font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sunk); padding: 1px 5px; border-radius: 3px; }
+.toasts { position: fixed; left: 50%; bottom: calc(70px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 50; display: grid; gap: 6px; pointer-events: none; }
+.toast { background: var(--ink); color: var(--ink-fg); padding: 8px 14px; border-radius: 999px; font-size: 13px; box-shadow: var(--shadow); animation: slideIn 0.3s ease-out; }
+.disclaimer { font-size: 12px; color: var(--fg-3); line-height: 1.5; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 24px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dot.live, .trow.new, .toast, .flash-up, .flash-down { animation: none; }
+}
+
+/* wide screens */
+@media (min-width: 980px) {
+  body { grid-template-columns: 196px minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  body.sheet-open { grid-template-columns: 196px minmax(0, 1fr) 468px; }
+  #nav { grid-row: 1 / 3; grid-column: 1; flex-direction: column; border-top: 0; border-right: 1px solid var(--line); padding: 14px 10px 14px var(--gutter-l); gap: 2px; justify-content: flex-start; }
+  #nav .navbrand { padding: 6px 10px 16px; }
+  #nav button { flex: 0 0 auto; flex-direction: row; justify-content: flex-start; gap: 10px; padding: 9px 10px; border-radius: var(--radius); font-size: 13px; text-transform: none; letter-spacing: 0; font-weight: 500; font-stretch: 100%; }
+  #nav button.on { background: var(--bg-elev); border: 1px solid var(--line); color: var(--fg); }
+  #nav button svg { width: 18px; height: 18px; }
+  #top { grid-row: 1; grid-column: 2; padding-left: 24px; }
+  #top .brand { display: none; }
+  #main { grid-row: 2; grid-column: 2; }
+  .view { padding-left: 24px; padding-right: 24px; }
+  #sheet { position: static; grid-row: 1 / 3; grid-column: 3; border-left: 1px solid var(--line); padding: 0; min-height: 0; }
+  #sheet .sheet-head { padding-left: 18px; padding-right: 18px; }
+  #sheet .sheet-body { padding-left: 18px; padding-right: 18px; }
+  .toasts { bottom: 24px; }
+}
+@media (max-width: 979px) { #nav .navbrand { display: none; } }
+</style>
+<header id="top">
+  <div class="brand"><h1>Edge Desk</h1><span class="tag">Kalshi analysis</span></div>
+  <div class="status" id="status">
+    <span class="row" style="gap:6px"><span class="dot" id="st-dot"></span><span id="st-text">Starting</span></span>
+    <span class="chip" id="st-source">—</span>
+    <span id="st-exchange" class="nowrap"></span>
+    <span id="st-updated" class="nowrap faint"></span>
+  </div>
+</header>
+
+<main id="main">
+  <section class="view" id="view-scanner">
+    <div id="scanner-banner"></div>
+    <div class="view-head"><h2>Scanner</h2><span class="sub" id="scanner-sub">Opportunities across the loaded market universe</span></div>
+    <div class="chips scroll" id="scanner-chips"></div>
+    <div id="scanner-brief"></div>
+    <div id="scanner-list" class="cards" style="margin-top:12px"></div>
+    <div class="disclaimer">Edge Desk analyzes public quotes and flags patterns worth a closer look. It is not financial advice, it does not know the news, and prediction markets can lose your entire stake. The paper desk is a simulation; anything real happens on Kalshi, under your own judgment.</div>
+  </section>
+
+  <section class="view" id="view-markets" hidden>
+    <div class="view-head"><h2>Markets</h2><span class="sub" id="markets-sub"></span></div>
+    <div class="toolbar">
+      <div class="search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="mk-search" type="search" placeholder="Search title or ticker" autocomplete="off"></div>
+      <select class="sel" id="mk-sort"><option value="vol24">24h volume</option><option value="vol">Total volume</option><option value="oi">Open interest</option><option value="close">Closing soonest</option><option value="move">Biggest move</option><option value="spread">Widest spread</option></select>
+      <label class="chip"><input type="checkbox" id="mk-watch-only" style="margin:0"> Watchlist</label>
+    </div>
+    <div class="chips scroll" id="mk-cats"></div>
+    <div class="list" id="mk-list" style="margin-top:10px"></div>
+    <div id="mk-more" style="margin-top:12px"></div>
+  </section>
+
+  <section class="view" id="view-tape" hidden>
+    <div class="view-head"><h2>Tape</h2><span class="sub">Every print on the exchange, newest first</span></div>
+    <div class="tape-stats" id="tape-stats"></div>
+    <div class="toolbar">
+      <div class="search"><input id="tape-filter" type="search" placeholder="Filter by ticker or title" autocomplete="off"></div>
+      <select class="sel" id="tape-min"><option value="0">All sizes</option><option value="50">50+ contracts</option><option value="200">200+</option><option value="500">500+ (big prints)</option><option value="2000">2,000+</option></select>
+      <label class="chip"><input type="checkbox" id="tape-pause" style="margin:0"> Pause</label>
+    </div>
+    <div id="tape-list"></div>
+  </section>
+
+  <section class="view" id="view-desk" hidden>
+    <div class="view-head"><h2>Paper desk</h2><span class="sub">Simulated fills at live quotes, with Kalshi's fee schedule</span></div>
+    <div class="tiles" id="desk-tiles"></div>
+    <div class="chart-wrap"><canvas id="desk-equity" height="110"></canvas><div class="chart-tip" id="desk-equity-tip"></div></div>
+    <div class="section"><h3>Positions</h3><div id="desk-positions"></div></div>
+    <div class="section"><h3>Resting orders</h3><div id="desk-orders"></div></div>
+    <div class="section"><h3>Fills</h3><div id="desk-fills"></div></div>
+    <div class="section"><h3>Account</h3><div class="row" id="desk-account"></div></div>
+  </section>
+
+  <section class="view" id="view-setup" hidden>
+    <div class="view-head"><h2>Setup</h2><span class="sub">Data source, intervals, fees and your paper account</span></div>
+    <div id="setup-conn"></div>
+    <div class="form" id="setup-form"></div>
+  </section>
+</main>
+
+<nav id="nav" aria-label="Views">
+  <div class="navbrand brand"><h1>Edge Desk</h1></div>
+  <button data-nav="scanner" class="on"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>Scanner</span></button>
+  <button data-nav="markets"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Markets</span></button>
+  <button data-nav="tape"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h13"/><circle cx="19" cy="12" r="1.5"/></svg><span>Tape</span></button>
+  <button data-nav="desk"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M8 15h4"/></svg><span>Desk</span></button>
+  <button data-nav="setup"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Setup</span></button>
+</nav>
+
+<aside id="sheet" hidden aria-label="Market detail">
+  <div class="sheet-head">
+    <div class="grow">
+      <div class="label" id="sh-event"></div>
+      <h2 id="sh-title"></h2>
+      <div class="small muted row" id="sh-meta" style="margin-top:4px"></div>
+    </div>
+    <button class="btn ghost sm" id="sh-close" aria-label="Close market panel">Close</button>
+  </div>
+  <div class="sheet-body" id="sh-body"></div>
+</aside>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+<script>
+/* Edge Desk core: pure functions (no DOM). Exposed as window.ED for the page and module.exports for tests. */
+(function (root) {
+  'use strict';
+
+  /* ---------- utilities ---------- */
+  const U = {};
+  U.num = function (x, fallback) {
+    if (x === null || x === undefined || x === '') return fallback === undefined ? null : fallback;
+    const n = typeof x === 'number' ? x : parseFloat(x);
+    return Number.isFinite(n) ? n : (fallback === undefined ? null : fallback);
+  };
+  U.dollars = function (dstr, cents) {
+    const d = U.num(dstr);
+    if (d !== null) return d;
+    const c = U.num(cents);
+    return c !== null ? c / 100 : null;
+  };
+  U.fp = function (fpstr, legacy) {
+    const a = U.num(fpstr);
+    if (a !== null) return a;
+    const b = U.num(legacy);
+    return b !== null ? b : 0;
+  };
+  U.clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  U.round = (v, d) => { const m = Math.pow(10, d || 0); return Math.round(v * m) / m; };
+  U.esc = (s) => String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  U.cents = function (p, opts) {
+    if (p === null || p === undefined || !Number.isFinite(p)) return '—';
+    const c = p * 100;
+    const r = Math.abs(c - Math.round(c)) < 0.005 ? Math.round(c).toString() : c.toFixed(1);
+    return r + ((opts && opts.bare) ? '' : '¢');
+  };
+  U.money = function (v, opts) {
+    if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+    const sign = v < 0 ? '−' : ((opts && opts.plus && v > 0) ? '+' : '');
+    const a = Math.abs(v);
+    const dec = (opts && opts.dec !== undefined) ? opts.dec : (a >= 1000 ? 0 : 2);
+    return sign + '$' + a.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  };
+  U.compact = function (n) {
+    if (n === null || n === undefined || !Number.isFinite(n)) return '—';
+    const a = Math.abs(n);
+    if (a >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+    if (a >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (a >= 1e4) return (n / 1e3).toFixed(0) + 'k';
+    if (a >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+    return Math.round(n).toLocaleString('en-US');
+  };
+  U.pct = function (v, d) {
+    if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+    return (v * 100).toFixed(d === undefined ? 1 : d) + '%';
+  };
+  U.signed = function (v, d) {
+    if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+    const s = v > 0 ? '+' : (v < 0 ? '−' : '');
+    return s + Math.abs(v).toFixed(d === undefined ? 1 : d);
+  };
+  U.ago = function (t, now) {
+    if (!t) return '—';
+    const s = Math.max(0, ((now || Date.now()) - t) / 1000);
+    if (s < 5) return 'now';
+    if (s < 60) return Math.floor(s) + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h';
+    return Math.floor(s / 86400) + 'd';
+  };
+  U.countdown = function (t, now) {
+    if (!t) return '—';
+    let s = (t - (now || Date.now())) / 1000;
+    if (s <= 0) return 'closed';
+    const d = Math.floor(s / 86400); s -= d * 86400;
+    const h = Math.floor(s / 3600); s -= h * 3600;
+    const m = Math.floor(s / 60);
+    if (d >= 30) return Math.round(d / 30.4) + 'mo';
+    if (d >= 2) return d + 'd ' + h + 'h';
+    if (d === 1) return '1d ' + h + 'h';
+    if (h >= 1) return h + 'h ' + m + 'm';
+    return m + 'm';
+  };
+  U.dateShort = function (t) {
+    if (!t) return '—';
+    const d = new Date(t);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+      ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  };
+  U.timeOnly = (t) => t ? new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : '—';
+  U.days = (t, now) => t ? Math.max(0, (t - (now || Date.now())) / 86400000) : null;
+  U.uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+  U.debounce = function (fn, ms) { let h = null; return function () { const a = arguments, c = this; clearTimeout(h); h = setTimeout(() => fn.apply(c, a), ms); }; };
+  U.niceTicks = function (lo, hi, n) {
+    if (!(hi > lo)) return [lo];
+    const span = hi - lo, raw = span / Math.max(1, n);
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const norm = raw / mag;
+    const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(U.round(v, 6));
+    return out;
+  };
+
+  /* ---------- normalization of Kalshi objects ---------- */
+  const N = {};
+  N.market = function (m, ev) {
+    if (!m || !m.ticker) return null;
+    const yb = U.dollars(m.yes_bid_dollars, m.yes_bid);
+    const ya = U.dollars(m.yes_ask_dollars, m.yes_ask);
+    let nb = U.dollars(m.no_bid_dollars, m.no_bid);
+    let na = U.dollars(m.no_ask_dollars, m.no_ask);
+    if (nb === null && ya !== null) nb = U.round(1 - ya, 4);
+    if (na === null && yb !== null) na = U.round(1 - yb, 4);
+    const hasBid = yb !== null && yb > 0;
+    const hasAsk = ya !== null && ya < 1;
+    const last = U.dollars(m.last_price_dollars, m.last_price);
+    const prevRaw = U.dollars(m.previous_price_dollars, m.previous_price);
+    const prev = prevRaw !== null && prevRaw > 0 ? prevRaw : null;
+    const series = m.series_ticker || (ev && ev.series) || String(m.event_ticker || '').split('-')[0];
+    const closeT = m.close_time ? Date.parse(m.close_time) : null;
+    const expT = (m.latest_expiration_time || m.expiration_time) ? Date.parse(m.latest_expiration_time || m.expiration_time) : null;
+    const mid = (hasBid && hasAsk) ? (yb + ya) / 2 : (last !== null && last > 0 ? last : (hasAsk ? ya : (hasBid ? yb : null)));
+    return {
+      ticker: m.ticker,
+      event: m.event_ticker || '',
+      series: series,
+      type: m.market_type || 'binary',
+      title: m.title || '',
+      sub: m.subtitle || '',
+      yesSub: m.yes_sub_title || '',
+      noSub: m.no_sub_title || '',
+      status: m.status || '',
+      open: m.open_time ? Date.parse(m.open_time) : null,
+      close: Number.isFinite(closeT) ? closeT : null,
+      exp: Number.isFinite(expT) ? expT : null,
+      yb: yb, ya: ya, nb: nb, na: na, hasBid: hasBid, hasAsk: hasAsk,
+      ybSize: U.fp(m.yes_bid_size_fp), yaSize: U.fp(m.yes_ask_size_fp),
+      last: last !== null && last > 0 ? last : null,
+      prev: prev,
+      mid: mid,
+      vol: U.fp(m.volume_fp, m.volume),
+      vol24: U.fp(m.volume_24h_fp, m.volume_24h),
+      oi: U.fp(m.open_interest_fp, m.open_interest),
+      result: m.result || '',
+      feeWaiverUntil: m.fee_waiver_expiration_time ? Date.parse(m.fee_waiver_expiration_time) : null,
+      canCloseEarly: !!m.can_close_early,
+      provisional: !!m.is_provisional,
+      strikeType: m.strike_type || '',
+      floor: m.floor_strike === undefined ? null : m.floor_strike,
+      cap: m.cap_strike === undefined ? null : m.cap_strike,
+      rules: m.rules_primary || '',
+      rules2: m.rules_secondary || '',
+      updated: Date.now()
+    };
+  };
+  N.event = function (e) {
+    if (!e || !e.event_ticker) return null;
+    return {
+      ticker: e.event_ticker,
+      series: e.series_ticker || String(e.event_ticker).split('-')[0],
+      title: e.title || '',
+      sub: e.sub_title || '',
+      category: e.category || '',
+      mutEx: !!e.mutually_exclusive,
+      feeType: e.fee_type_override || null,
+      feeMult: (e.fee_multiplier_override === undefined || e.fee_multiplier_override === null) ? null : U.num(e.fee_multiplier_override),
+      markets: (e.markets || []).map(m => m.ticker).filter(Boolean)
+    };
+  };
+  N.book = function (res) {
+    const ob = (res && (res.orderbook_fp || res.orderbook)) || {};
+    const parse = (arr, scale) => (arr || []).map(x => [U.num(x[0]), U.num(x[1])])
+      .filter(x => x[0] !== null && x[1] !== null)
+      .map(x => [scale ? x[0] / scale : x[0], x[1]]);
+    let yesBids, noBids;
+    if (ob.yes_dollars || ob.no_dollars) { yesBids = parse(ob.yes_dollars); noBids = parse(ob.no_dollars); }
+    else { yesBids = parse(ob.yes, 100); noBids = parse(ob.no, 100); }
+    yesBids.sort((a, b) => b[0] - a[0]);
+    noBids.sort((a, b) => b[0] - a[0]);
+    const yesAsks = noBids.map(x => [U.round(1 - x[0], 4), x[1]]).sort((a, b) => a[0] - b[0]);
+    const noAsks = yesBids.map(x => [U.round(1 - x[0], 4), x[1]]).sort((a, b) => a[0] - b[0]);
+    return {
+      yesBids: yesBids, noBids: noBids, yesAsks: yesAsks, noAsks: noAsks,
+      bestBid: yesBids.length ? yesBids[0][0] : null,
+      bestAsk: yesAsks.length ? yesAsks[0][0] : null,
+      bidDepth: yesBids.reduce((s, x) => s + x[1], 0),
+      askDepth: yesAsks.reduce((s, x) => s + x[1], 0),
+      t: Date.now()
+    };
+  };
+  N.trade = function (t) {
+    if (!t || !t.ticker) return null;
+    const yes = U.dollars(t.yes_price_dollars, t.yes_price);
+    const no = U.dollars(t.no_price_dollars, t.no_price);
+    return {
+      id: t.trade_id || (t.ticker + ':' + t.created_time + ':' + yes),
+      ticker: t.ticker,
+      qty: U.fp(t.count_fp, t.count),
+      yes: yes, no: no === null && yes !== null ? U.round(1 - yes, 4) : no,
+      taker: t.taker_side || t.taker_outcome_side || '',
+      t: t.created_time ? Date.parse(t.created_time) : Date.now(),
+      block: !!t.is_block_trade
+    };
+  };
+  N.candles = function (arr) {
+    const pd = (o, k) => {
+      if (!o) return null;
+      const d = U.num(o[k + '_dollars']);
+      if (d !== null) return d;
+      const c = U.num(o[k]);
+      return c !== null ? c / 100 : null;
+    };
+    const out = [];
+    let lastClose = null;
+    for (const c of (arr || [])) {
+      const t = (U.num(c.end_period_ts) || 0) * 1000;
+      if (!t) continue;
+      const pr = c.price || {}, yb = c.yes_bid || {}, ya = c.yes_ask || {};
+      const ybc = pd(yb, 'close'), yac = pd(ya, 'close');
+      let close = pd(pr, 'close');
+      const prevP = pd(pr, 'previous');
+      if (close === null || close <= 0) {
+        if (ybc !== null && yac !== null && ybc > 0 && yac < 1) close = (ybc + yac) / 2;
+        else if (prevP !== null && prevP > 0) close = prevP;
+        else close = lastClose;
+      }
+      if (close === null) continue;
+      const open = pd(pr, 'open'), high = pd(pr, 'high'), low = pd(pr, 'low');
+      out.push({
+        t: t,
+        o: open !== null && open > 0 ? open : (lastClose !== null ? lastClose : close),
+        h: high !== null && high > 0 ? high : close,
+        l: low !== null && low > 0 ? low : close,
+        c: close,
+        yb: ybc, ya: yac,
+        vol: U.fp(c.volume_fp, c.volume),
+        oi: U.fp(c.open_interest_fp, c.open_interest)
+      });
+      lastClose = close;
+    }
+    out.sort((a, b) => a.t - b.t);
+    return out;
+  };
+
+  /* ---------- fees (Kalshi schedule: taker = ceil(M × 0.07 × C × P × (1−P)); maker 0.0175 only on flagged series) ---------- */
+  const F = {
+    TAKER: 0.07,
+    MAKER: 0.0175,
+    rate: function (kind, info) {
+      info = info || {};
+      const M = (info.mult === null || info.mult === undefined) ? 1 : info.mult;
+      const type = info.type || 'quadratic';
+      if (info.waived) return 0;
+      if (kind === 'maker') {
+        if (type === 'quadratic_with_maker_fees') return F.MAKER * M;
+        if (type === 'quadratic_with_combo_maker_fees') return F.TAKER * 0.5 * M;
+        return 0;
+      }
+      return (info.takerRate || F.TAKER) * M;
+    },
+    // returns fee in dollars for an order of `qty` contracts at `price` (dollars)
+    calc: function (qty, price, kind, info, rounding) {
+      if (!(qty > 0) || price === null || price === undefined) return 0;
+      const r = F.rate(kind, info);
+      if (r <= 0) return 0;
+      const raw = r * qty * price * (1 - price);
+      if (rounding === 'cent') return Math.ceil(raw * 100 - 1e-9) / 100;
+      return Math.ceil(raw * 10000 - 1e-9) / 10000;
+    },
+    perContract: function (price, kind, info, rounding) {
+      return F.calc(1, price, kind, info, rounding);
+    }
+  };
+
+  /* ---------- analytics ---------- */
+  const A = {};
+  // EV / Kelly for buying one side at `price` with belief `q` = P(YES). feePer in dollars per contract.
+  A.edge = function (q, side, price, feePer) {
+    if (price === null || price === undefined || !(price > 0) || !(price < 1)) return null;
+    const p = side === 'yes' ? q : 1 - q;
+    const cost = price + (feePer || 0);
+    const ev = p - cost;
+    const kelly = cost < 1 ? Math.max(0, (p - cost) / (1 - cost)) : 0;
+    return { side: side, p: p, price: price, fee: feePer || 0, cost: cost, ev: ev, roi: cost > 0 ? ev / cost : 0, breakeven: cost, kelly: kelly };
+  };
+  A.sizeFor = function (bankroll, kellyFraction, edge) {
+    if (!edge || edge.kelly <= 0 || !(bankroll > 0)) return { stake: 0, contracts: 0, fraction: 0 };
+    const frac = edge.kelly * (kellyFraction || 0.25);
+    const stake = bankroll * frac;
+    const contracts = Math.floor(stake / edge.cost);
+    return { stake: stake, contracts: contracts, fraction: frac };
+  };
+  A.annualized = function (cost, days) {
+    if (!(cost > 0) || !(cost < 1) || !(days > 0)) return null;
+    const ret = (1 - cost) / cost;
+    return ret * (365 / days);
+  };
+  A.fillFromBook = function (levels, qty) {
+    // levels: [[price, size]] sorted best-first (ascending for asks). Returns {filled, cost, avg}
+    let left = qty, cost = 0, filled = 0;
+    for (const [p, s] of (levels || [])) {
+      if (left <= 0) break;
+      const take = Math.min(left, s);
+      cost += take * p; filled += take; left -= take;
+    }
+    return { filled: filled, cost: cost, avg: filled > 0 ? cost / filled : null, unfilled: left };
+  };
+  A.feeInfoFor = function (m, ev, seriesInfo, settings, now) {
+    const info = { type: 'quadratic', mult: 1, waived: false, takerRate: (settings && settings.takerRate) || F.TAKER };
+    if (seriesInfo) {
+      if (seriesInfo.fee_type) info.type = seriesInfo.fee_type;
+      if (seriesInfo.fee_multiplier !== undefined && seriesInfo.fee_multiplier !== null) info.mult = U.num(seriesInfo.fee_multiplier, 1);
+    }
+    if (ev) {
+      if (ev.feeType) info.type = ev.feeType;
+      if (ev.feeMult !== null && ev.feeMult !== undefined) info.mult = ev.feeMult;
+    }
+    if (m && m.feeWaiverUntil && m.feeWaiverUntil > (now || Date.now())) info.waived = true;
+    return info;
+  };
+
+  // Scan the universe. universe = {events: Map, markets: Map}; returns array of opportunities sorted by priority.
+  A.scan = function (universe, settings, seriesCache, now) {
+    now = now || Date.now();
+    settings = settings || {};
+    const rounding = settings.rounding || 'centicent';
+    const minSpread = settings.minSpread || 0.04;
+    const out = [];
+    const mkts = universe.markets, evs = universe.events;
+    const feeInfo = (m, ev) => A.feeInfoFor(m, ev, seriesCache && seriesCache[m.series], settings, now);
+    const takerFee = (m, ev, price) => F.perContract(price, 'taker', feeInfo(m, ev), rounding);
+
+    // 1) One-winner books (mutually exclusive events)
+    for (const ev of evs.values()) {
+      if (!ev.mutEx || ev.markets.length < 2) continue;
+      const legs = ev.markets.map(t => mkts.get(t)).filter(m => m && m.status === 'active' && m.type === 'binary');
+      if (legs.length < 2) continue;
+      // Buy NO on every leg: profit when Σ yes_bid > 1 + fees. Safe under mutual exclusivity (at most one YES).
+      const noLegs = legs.filter(m => m.hasBid);
+      if (noLegs.length === legs.length) {
+        const sumBid = noLegs.reduce((s, m) => s + m.yb, 0);
+        const fees = noLegs.reduce((s, m) => s + takerFee(m, ev, 1 - m.yb), 0);
+        const margin = sumBid - 1 - fees;
+        const size = Math.min.apply(null, noLegs.map(m => m.ybSize || 0));
+        if (margin > 0.0005) {
+          out.push({
+            kind: 'arb', sub: 'no', score: 100 + margin * 100 + Math.log10(1 + size),
+            event: ev.ticker, tickers: noLegs.map(m => m.ticker), title: ev.title || noLegs[0].title,
+            margin: margin, sumBid: sumBid, fees: fees, size: size, legs: noLegs.length,
+            headline: 'Sell the whole book: YES bids sum to ' + U.cents(sumBid),
+            math: 'Buy NO on all ' + noLegs.length + ' legs. Cost ' + U.cents(noLegs.length - sumBid) + ' for a ' + U.cents(noLegs.length - 1) + ' minimum payout. Margin ' + U.cents(margin) + '/set after ' + U.cents(fees) + ' fees. Top-of-book size ' + U.compact(size) + ' sets.',
+            note: 'Locked if at most one leg settles YES (Kalshi flags this event as mutually exclusive). Fills at the quoted bids only up to the shown size.'
+          });
+        }
+      }
+      // Buy YES on every leg: profit when Σ yes_ask < 1 − fees. Needs one leg to settle YES (exhaustive outcomes).
+      const yesLegs = legs.filter(m => m.hasAsk);
+      if (yesLegs.length === legs.length) {
+        const sumAsk = yesLegs.reduce((s, m) => s + m.ya, 0);
+        const fees = yesLegs.reduce((s, m) => s + takerFee(m, ev, m.ya), 0);
+        const margin = 1 - sumAsk - fees;
+        const size = Math.min.apply(null, yesLegs.map(m => m.yaSize || 0));
+        if (margin > 0.0005) {
+          out.push({
+            kind: 'arb', sub: 'yes', score: 95 + margin * 100 + Math.log10(1 + size),
+            event: ev.ticker, tickers: yesLegs.map(m => m.ticker), title: ev.title || yesLegs[0].title,
+            margin: margin, sumAsk: sumAsk, fees: fees, size: size, legs: yesLegs.length,
+            headline: 'Buy the whole book: YES asks sum to ' + U.cents(sumAsk),
+            math: 'Buy YES on all ' + yesLegs.length + ' legs for ' + U.cents(sumAsk) + ' + ' + U.cents(fees) + ' fees; exactly one pays $1. Margin ' + U.cents(margin) + '/set. Top-of-book size ' + U.compact(size) + ' sets.',
+            note: 'Only locked if one of these outcomes must happen. If the event can settle with no YES (an unlisted outcome wins), the whole stake is lost. Check the rules before treating this as riskless.'
+          });
+        }
+      }
+    }
+
+    // 2) Per-market signals
+    for (const m of mkts.values()) {
+      if (m.status !== 'active' || m.type !== 'binary') continue;
+      const ev = evs.get(m.event);
+      const days = U.days(m.close, now);
+      const label = m.title || ((ev ? ev.title + ' · ' : '') + m.yesSub);
+
+      // Wide spread: quote inside it and earn the spread (maker)
+      if (m.hasBid && m.hasAsk) {
+        const spread = m.ya - m.yb;
+        if (spread >= minSpread && m.vol24 >= 20 && m.yb >= 0.03 && m.ya <= 0.97) {
+          const info = feeInfo(m, ev);
+          const makerRate = F.rate('maker', info);
+          const score = spread * 100 * Math.log10(10 + m.vol24);
+          out.push({
+            kind: 'spread', score: score, tickers: [m.ticker], event: m.event, title: label,
+            spread: spread, yb: m.yb, ya: m.ya, vol24: m.vol24,
+            headline: 'Spread ' + U.cents(spread) + ' wide (' + U.cents(m.yb) + ' / ' + U.cents(m.ya) + ')',
+            math: 'A resting bid at ' + U.cents(m.yb + 0.01) + ' and an offer at ' + U.cents(m.ya - 0.01) + ' still improve both sides by 1¢ and keep ' + U.cents(spread - 0.02) + ' between them. 24h volume ' + U.compact(m.vol24) + '. ' + (makerRate > 0 ? 'This series charges maker fees (' + (makerRate * 100).toFixed(2) + '% × P × (1−P)).' : 'Resting orders pay no fee on this series.'),
+            note: 'You only earn the spread if both sides fill; a one-sided fill leaves you with a position. Adverse selection is the real cost here.'
+          });
+        }
+      }
+
+      // Movers
+      if (m.last !== null && m.prev !== null && m.vol24 >= 20) {
+        const d = m.last - m.prev;
+        if (Math.abs(d) >= 0.05) {
+          out.push({
+            kind: 'mover', score: Math.abs(d) * 100 * Math.log10(10 + m.vol24), tickers: [m.ticker], event: m.event, title: label,
+            delta: d, last: m.last, prev: m.prev, vol24: m.vol24,
+            headline: (d > 0 ? '▲ ' : '▼ ') + U.cents(Math.abs(d)) + ' move to ' + U.cents(m.last),
+            math: 'Last trade ' + U.cents(m.last) + ' vs ' + U.cents(m.prev) + ' a day ago on ' + U.compact(m.vol24) + ' contracts. Open interest ' + U.compact(m.oi) + '.',
+            note: 'Momentum in event markets often means news. Read the rules and the news before fading or following.'
+          });
+        }
+      }
+
+      // Near-certain yield (cash-like returns with tail risk)
+      if (days !== null && days >= 0.05 && days <= 60) {
+        const info = feeInfo(m, ev);
+        let side = null, price = null;
+        if (m.hasAsk && m.ya >= 0.90 && m.ya <= 0.985) { side = 'yes'; price = m.ya; }
+        else if (m.hasBid && (1 - m.yb) >= 0.90 && (1 - m.yb) <= 0.985) { side = 'no'; price = 1 - m.yb; }
+        if (side && m.vol >= 100) {
+          const fee = F.perContract(price, 'taker', info, rounding);
+          const cost = price + fee;
+          const ann = A.annualized(cost, days);
+          if (ann !== null && ann >= 0.10) {
+            out.push({
+              kind: 'yield', score: Math.log10(1 + ann * 100) * 25 + Math.log10(10 + m.vol24), tickers: [m.ticker], event: m.event, title: label,
+              side: side, price: price, fee: fee, cost: cost, ann: ann, days: days,
+              headline: side.toUpperCase() + ' at ' + U.cents(price) + ' pays ' + U.pct((1 - cost) / cost, 1) + ' in ' + (days < 1 ? Math.round(days * 24) + 'h' : Math.round(days) + 'd'),
+              math: 'Buy ' + side.toUpperCase() + ' at ' + U.cents(price) + ' (+' + U.cents(fee) + ' fee) → $1 at settlement if right. That is ' + U.pct(ann, 0) + ' annualized over ' + (days < 1 ? Math.round(days * 24) + ' hours' : days.toFixed(1) + ' days') + '.',
+              note: 'The market thinks the other side is a ' + U.pct(1 - price, 0) + ' chance. Be right about why it is small: a single miss costs ' + U.cents(cost) + ' per contract.'
+            });
+          }
+        }
+      }
+
+      // Volume surge
+      if (m.vol24 >= 300 && m.oi > 0 && m.vol24 / m.oi >= 0.5) {
+        out.push({
+          kind: 'volume', score: Math.log10(10 + m.vol24) * 10 + (m.vol24 / m.oi), tickers: [m.ticker], event: m.event, title: label,
+          vol24: m.vol24, oi: m.oi,
+          headline: U.compact(m.vol24) + ' contracts in 24h (' + U.round(m.vol24 / m.oi, 1) + '× open interest)',
+          math: 'Price ' + U.cents(m.mid) + '. Spread ' + (m.hasBid && m.hasAsk ? U.cents(m.ya - m.yb) : '—') + '. Closes in ' + U.countdown(m.close, now) + '.',
+          note: 'High turnover means attention and liquidity: tighter fills, but also informed flow.'
+        });
+      }
+
+      // Longshot zone (favorite–longshot bias is a well-documented tendency, not a guarantee)
+      if (m.hasAsk && m.ya <= 0.06 && m.ya >= 0.02 && m.vol24 >= 50 && days !== null && days <= 30) {
+        const info = feeInfo(m, ev);
+        const noPrice = 1 - m.yb;
+        if (m.hasBid && noPrice < 1) {
+          const fee = F.perContract(noPrice, 'taker', info, rounding);
+          out.push({
+            kind: 'longshot', score: (0.06 - m.ya) * 100 + Math.log10(10 + m.vol24), tickers: [m.ticker], event: m.event, title: label,
+            ya: m.ya, noPrice: noPrice, fee: fee,
+            headline: 'YES priced at ' + U.cents(m.ya) + ' with ' + U.compact(m.vol24) + ' traded today',
+            math: 'Longshots in prediction markets have historically traded above their realized frequency. NO at ' + U.cents(noPrice) + ' (+' + U.cents(fee) + ' fee) pays ' + U.pct((1 - noPrice - fee) / (noPrice + fee), 1) + ' if the longshot misses.',
+            note: 'A tendency across many markets, not a rule for this one. Small payout, full-stake downside.'
+          });
+        }
+      }
+    }
+
+    const prio = { arb: 0, yield: 1, spread: 2, mover: 3, volume: 4, longshot: 5 };
+    out.sort((a, b) => (prio[a.kind] - prio[b.kind]) || (b.score - a.score));
+    return out;
+  };
+
+  // Build OHLC candles from a list of trades (any order) with the given bucket size in ms
+  A.candlesFromTrades = function (trades, bucketMs) {
+    const sorted = (trades || []).filter(t => t.yes !== null && t.t).slice().sort((a, b) => a.t - b.t);
+    const out = [];
+    let cur = null;
+    for (const t of sorted) {
+      const b = Math.floor(t.t / bucketMs) * bucketMs + bucketMs;
+      if (!cur || cur.t !== b) { cur = { t: b, o: t.yes, h: t.yes, l: t.yes, c: t.yes, vol: 0, oi: 0 }; out.push(cur); }
+      cur.h = Math.max(cur.h, t.yes); cur.l = Math.min(cur.l, t.yes); cur.c = t.yes; cur.vol += t.qty || 0;
+    }
+    return out;
+  };
+
+  // Tape statistics over a window (ms)
+  A.tapeStats = function (trades, windowMs, now) {
+    now = now || Date.now();
+    const since = now - windowMs;
+    let n = 0, yesQty = 0, noQty = 0, notional = 0, big = 0;
+    const byTicker = new Map();
+    for (const t of trades) {
+      if (t.t < since) continue;
+      n++;
+      const price = t.taker === 'no' ? t.no : t.yes;
+      notional += t.qty * (price || 0);
+      if (t.taker === 'no') noQty += t.qty; else yesQty += t.qty;
+      if (t.qty >= 500) big++;
+      const e = byTicker.get(t.ticker) || { ticker: t.ticker, n: 0, qty: 0, yesQty: 0, noQty: 0, last: null };
+      e.n++; e.qty += t.qty; if (t.taker === 'no') e.noQty += t.qty; else e.yesQty += t.qty; e.last = t.yes;
+      byTicker.set(t.ticker, e);
+    }
+    const top = Array.from(byTicker.values()).sort((a, b) => b.qty - a.qty).slice(0, 8);
+    return { n: n, yesQty: yesQty, noQty: noQty, notional: notional, big: big, top: top, perMin: n / Math.max(1, windowMs / 60000) };
+  };
+
+  /* ---------- simulated exchange (for demo mode; clearly labeled in the UI) ---------- */
+  function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const SIM = {};
+  SIM.create = function (seed) {
+    const rnd = mulberry32(seed || 7);
+    const now = Date.now();
+    const H = 3600000, D = 86400000;
+    const events = [];
+    const E = (ticker, series, category, title, mutEx, legs, opts) => {
+      events.push({ ticker: ticker, series: series, category: category, title: title, sub: (opts && opts.sub) || '', mutEx: mutEx, markets: [], feeType: null, feeMult: null, _legs: legs, _opts: opts || {} });
+    };
+    E('KXFEDDEC-26DEC', 'KXFEDDEC', 'Economics', 'Fed decision at the December meeting', true,
+      [['Cut 50 bps', 0.04], ['Cut 25 bps', 0.61], ['Hold', 0.33], ['Hike', 0.02]], { close: now + 38 * D });
+    E('KXCPIYOY-26OCT', 'KXCPIYOY', 'Economics', 'October CPI year-over-year', true,
+      [['2.8% or below', 0.11], ['2.9%', 0.24], ['3.0%', 0.31], ['3.1%', 0.21], ['3.2% or above', 0.14]], { close: now + 4 * D });
+    E('KXUNEMP-26NOV', 'KXUNEMP', 'Economics', 'November unemployment rate', true,
+      [['4.1% or below', 0.20], ['4.2%', 0.37], ['4.3%', 0.31], ['4.4% or above', 0.21]], { close: now + 26 * D, arbNo: true });
+    E('KXHIGHNY-26NOV09', 'KXHIGHNY', 'Climate and Weather', 'Highest temperature in NYC on Nov 9', true,
+      [['48° or below', 0.03], ['49° to 50°', 0.08], ['51° to 52°', 0.20], ['53° to 54°', 0.31], ['55° to 56°', 0.19], ['57° or above', 0.10]], { close: now + 20 * H, arbYes: true });
+    E('KXBTCRANGE-26DEC31', 'KXBTCRANGE', 'Crypto', 'Bitcoin price on Dec 31', true,
+      [['Below $80k', 0.14], ['$80k to $90k', 0.22], ['$90k to $100k', 0.27], ['$100k to $110k', 0.21], ['Above $110k', 0.17]], { close: now + 53 * D });
+    E('KXSHUTDOWN-26NOV30', 'KXSHUTDOWN', 'Politics', 'Federal government shutdown by Nov 30?', false,
+      [['Yes', 0.07]], { close: now + 22 * D, wide: true });
+    E('KXFARMBILL-26', 'KXFARMBILL', 'Politics', 'Farm bill signed into law in 2026?', false,
+      [['Yes', 0.31]], { close: now + 53 * D, wide: true });
+    E('KXNFLGAME-26NOV09NEBUF', 'KXNFLGAME', 'Sports', 'Patriots at Bills', true,
+      [['Patriots win', 0.42], ['Bills win', 0.58]], { close: now + 30 * H, hot: true });
+    E('KXNBAWINS-26BOS', 'KXNBAWINS', 'Sports', 'Celtics regular-season wins', true,
+      [['54 or fewer', 0.46], ['55 or more', 0.54]], { close: now + 150 * D });
+    E('KXOSCARPIC-27', 'KXOSCARPIC', 'Entertainment', 'Best Picture at the 2027 Oscars', true,
+      [['Frontrunner A', 0.29], ['Frontrunner B', 0.24], ['Frontrunner C', 0.15], ['Frontrunner D', 0.09], ['Another film', 0.23]], { close: now + 120 * D });
+    E('KXSTARSHIP-26DEC31', 'KXSTARSHIP', 'Science and Technology', 'Starship reaches orbit by Dec 31?', false,
+      [['Yes', 0.77]], { close: now + 53 * D, hot: true });
+    E('KXMCAP-26DEC31', 'KXMCAP', 'Companies', 'Largest company by market cap on Dec 31', true,
+      [['Nvidia', 0.63], ['Microsoft', 0.17], ['Apple', 0.16], ['Another company', 0.04]], { close: now + 53 * D });
+    E('KXRAINNYC-26NOV09', 'KXRAINNYC', 'Climate and Weather', 'Measurable rain in NYC on Nov 9?', false,
+      [['Yes', 0.06]], { close: now + 22 * H, yieldy: true });
+    E('KXGDPQ3-26', 'KXGDPQ3', 'Economics', 'Q3 GDP growth above 2.0% (second estimate)?', false,
+      [['Yes', 0.93]], { close: now + 17 * D, yieldy: true });
+    E('KXSNOWBOS-26NOV', 'KXSNOWBOS', 'Climate and Weather', 'Snow in Boston before Nov 30?', false,
+      [['Yes', 0.38]], { close: now + 22 * D, hot: true });
+
+    const markets = new Map();
+    const books = new Map();
+    const hist = new Map();
+    const feeSeries = { KXFEDDEC: { fee_type: 'quadratic_with_maker_fees', fee_multiplier: 1 }, KXCPIYOY: { fee_type: 'quadratic_with_maker_fees', fee_multiplier: 1 }, KXNFLGAME: { fee_type: 'quadratic_with_maker_fees', fee_multiplier: 1 } };
+
+    for (const ev of events) {
+      const legs = ev._legs, o = ev._opts;
+      let i = 0;
+      for (const [name, p0] of legs) {
+        i++;
+        const ticker = ev.ticker + (legs.length > 1 ? '-' + String(i).padStart(2, '0') : '');
+        let p = p0;
+        let half = o.wide ? 0.035 : (o.hot ? 0.005 : 0.012);
+        if (o.arbNo) half = -0.003; // bids sum above 100
+        if (o.arbYes) half = -0.004; // asks sum below 100
+        half = Math.max(half, -0.004);
+        const yb = U.clamp(U.round(p - half, 2), 0.01, 0.98), ya = U.clamp(U.round(p + half, 2), yb + (half < 0 ? 0 : 0.01), 0.99);
+        const vol24 = Math.round((o.hot ? 4000 : 600) * (0.3 + rnd() * 1.4));
+        const m = {
+          ticker: ticker, event: ev.ticker, series: ev.series, type: 'binary',
+          title: legs.length > 1 ? ev.title + ': ' + name : ev.title,
+          sub: '', yesSub: name, noSub: '', status: 'active',
+          open: now - 20 * D, close: o.close, exp: o.close + D,
+          yb: yb, ya: ya, nb: U.round(1 - ya, 4), na: U.round(1 - yb, 4), hasBid: true, hasAsk: true,
+          ybSize: Math.round(80 + rnd() * 900), yaSize: Math.round(80 + rnd() * 900),
+          last: U.round(p, 2), prev: U.clamp(U.round(p + (rnd() - 0.5) * (o.hot ? 0.18 : 0.06), 2), 0.01, 0.99),
+          mid: p, vol: vol24 * Math.round(5 + rnd() * 30), vol24: vol24, oi: Math.round(vol24 * (1 + rnd() * 6)),
+          result: '', feeWaiverUntil: null, canCloseEarly: false, provisional: false,
+          strikeType: '', floor: null, cap: null,
+          rules: 'Simulated market. If the stated outcome occurs by the close time, the market resolves YES; otherwise it resolves NO. Settlement follows the primary source named in the full rules.',
+          rules2: 'This is demonstration data generated inside Edge Desk; nothing here is a real Kalshi market.',
+          updated: now
+        };
+        if (o.yieldy && p0 > 0.9) { m.ya = 0.95; m.yb = 0.93; m.nb = 0.05; m.na = 0.07; m.last = 0.94; m.mid = 0.94; }
+        markets.set(ticker, m);
+        ev.markets.push(ticker);
+        // history: random walk ending at p
+        const pts = [];
+        let v = U.clamp(p + (rnd() - 0.5) * 0.3, 0.03, 0.97);
+        const n = 24 * 30;
+        for (let k = 0; k < n; k++) {
+          const drift = (p - v) * 0.02;
+          v = U.clamp(v + drift + (rnd() - 0.5) * 0.03, 0.01, 0.99);
+          pts.push({ t: now - (n - k) * H, c: U.round(v, 3), vol: Math.round(rnd() * (o.hot ? 400 : 60)) });
+        }
+        pts[pts.length - 1].c = m.last;
+        hist.set(ticker, pts);
+      }
+      delete ev._legs; delete ev._opts;
+    }
+
+    const evMap = new Map(events.map(e => [e.ticker, e]));
+    let tradeSeq = 1;
+    const tickers = Array.from(markets.keys());
+
+    function synthBook(m) {
+      const yesBids = [], noBids = [];
+      let p = m.yb, size = m.ybSize;
+      for (let k = 0; k < 12 && p >= 0.01; k++) { yesBids.push([U.round(p, 2), Math.round(size)]); p -= 0.01 * (1 + Math.floor(rnd() * 2)); size *= 0.75 + rnd() * 0.6; }
+      p = m.nb; size = m.yaSize;
+      for (let k = 0; k < 12 && p >= 0.01; k++) { noBids.push([U.round(p, 2), Math.round(size)]); p -= 0.01 * (1 + Math.floor(rnd() * 2)); size *= 0.75 + rnd() * 0.6; }
+      return N.book({ orderbook_fp: { yes_dollars: yesBids.map(x => [x[0].toFixed(4), x[1].toFixed(2)]), no_dollars: noBids.map(x => [x[0].toFixed(4), x[1].toFixed(2)]) } });
+    }
+
+    return {
+      label: 'Simulated',
+      events: evMap,
+      markets: markets,
+      seriesFees: feeSeries,
+      status: { exchange_active: true, trading_active: true },
+      tick: function () {
+        const t = Date.now();
+        for (const m of markets.values()) {
+          if (rnd() < 0.35) {
+            const dv = (rnd() - 0.5) * 0.02;
+            let mid = U.clamp(m.mid + dv, 0.02, 0.98);
+            const half = Math.max(0.005, (m.ya - m.yb) / 2);
+            m.yb = U.clamp(U.round(mid - half, 2), 0.01, 0.98);
+            m.ya = U.clamp(U.round(mid + half, 2), m.yb + 0.01, 0.99);
+            m.nb = U.round(1 - m.ya, 4); m.na = U.round(1 - m.yb, 4);
+            m.mid = (m.yb + m.ya) / 2; m.updated = t;
+          }
+        }
+      },
+      trades: function (n) {
+        const out = [];
+        const t0 = Date.now();
+        for (let k = 0; k < n; k++) {
+          const m = markets.get(tickers[Math.floor(rnd() * tickers.length)]);
+          const takerYes = rnd() < 0.5;
+          const price = takerYes ? m.ya : m.yb;
+          const qty = Math.round(rnd() < 0.08 ? 400 + rnd() * 2500 : 1 + rnd() * 120);
+          m.last = price; m.vol += qty; m.vol24 += qty; m.updated = t0;
+          out.push({ id: 'sim-' + (tradeSeq++), ticker: m.ticker, qty: qty, yes: price, no: U.round(1 - price, 4), taker: takerYes ? 'yes' : 'no', t: t0 - Math.floor(rnd() * 3000), block: qty > 2000 });
+        }
+        return out.sort((a, b) => b.t - a.t);
+      },
+      book: function (ticker) { const m = markets.get(ticker); return m ? synthBook(m) : null; },
+      marketTrades: function (ticker, n) {
+        const m = markets.get(ticker); if (!m) return [];
+        const out = []; const t0 = Date.now();
+        for (let k = 0; k < n; k++) {
+          const takerYes = rnd() < 0.5; const price = U.clamp(U.round((takerYes ? m.ya : m.yb) + (rnd() - 0.5) * 0.02, 2), 0.01, 0.99);
+          out.push({ id: 'simt-' + ticker + '-' + k, ticker: ticker, qty: Math.round(1 + rnd() * 200), yes: price, no: U.round(1 - price, 4), taker: takerYes ? 'yes' : 'no', t: t0 - k * 240000 - Math.floor(rnd() * 60000), block: false });
+        }
+        return out;
+      },
+      candles: function (ticker, period, startMs) {
+        const pts = hist.get(ticker) || [];
+        const sel = pts.filter(p => p.t >= startMs);
+        if (period >= 1440) {
+          const byDay = new Map();
+          for (const p of sel) { const d = Math.floor(p.t / D); const e = byDay.get(d) || { t: (d + 1) * D, o: p.c, h: p.c, l: p.c, c: p.c, vol: 0 }; e.c = p.c; e.h = Math.max(e.h, p.c); e.l = Math.min(e.l, p.c); e.vol += p.vol; byDay.set(d, e); }
+          return Array.from(byDay.values());
+        }
+        return sel.map(p => ({ t: p.t, o: p.c, h: p.c + 0.005, l: p.c - 0.005, c: p.c, vol: p.vol, oi: 0 }));
+      },
+      resolveRandom: function () { return null; }
+    };
+  };
+
+  const ED = { U: U, N: N, F: F, A: A, SIM: SIM };
+  root.ED = ED;
+  if (typeof module !== 'undefined' && module.exports) module.exports = ED;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>
+/* Edge Desk app, part 1: state, persistence, data sources, polling engine, paper desk, charts. */
+(function () {
+  'use strict';
+  const { U, N, F, A, SIM } = window.ED;
+  const $ = (id) => document.getElementById(id);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const isMobile = () => window.innerWidth < 980;
+
+  /* ---------- state ---------- */
+  const DEFAULTS = {
+    relayUrl: '', relayKey: '', env: 'prod', dataMode: 'auto', slim: false,
+    pollTape: 4, pollMarkets: 10, pollBook: 3, universePages: isMobile() ? 4 : 8, universeRefreshMin: 15,
+    bankroll: 1000, kelly: 0.25, rounding: 'centicent', takerRate: 0.07, minSpread: 0.04, bigPrint: 500
+  };
+  // Where is this page running? Inside the Claude artifact viewer (outside network blocked), self-hosted on the
+  // Edge Desk worker (same-origin relay), or opened as a plain file.
+  const CTX = (window.claude && typeof window.claude.use === 'function') ? 'artifact' : (location.protocol === 'file:' ? 'file' : 'hosted');
+  const S = window.EDS = {
+    ctx: CTX,
+    sameOrigin: false,       // true when this page's own origin relays Kalshi (worker deployment)
+    settings: Object.assign({}, DEFAULTS),
+    mode: 'boot',            // boot | live | sim
+    source: 'none',          // relay | direct | sim
+    health: { status: 'idle', text: 'Starting', lastOk: 0, lastErr: '', exchange: null, errors: 0 },
+    blocked: {},             // endpoint family → true when the public API answered 401/403 (needs auth)
+    universe: { events: new Map(), markets: new Map(), loadedAt: 0, pages: 0, loading: false },
+    extras: new Set(),       // tickers fetched individually (kept across universe reloads)
+    tape: { trades: [], seen: new Set(), lastTs: 0, paused: false },
+    scanner: { ops: [], kind: 'all', at: 0, brief: null },
+    watch: new Set(),
+    desk: null,
+    seriesCache: {},
+    view: 'scanner',
+    sel: null,
+    sheet: { book: null, trades: [], candles: [], range: '1W', candlesAt: 0, ai: null, aiBusy: false, calcQ: null, ticket: { side: 'yes', type: 'market', qty: 10, price: null } },
+    ai: null,                // sample() or null
+    sim: null,
+    timers: {},
+    flash: new Map()
+  };
+
+  /* ---------- persistence (db capability per viewer, localStorage fallback) ---------- */
+  const Persist = {
+    key: 'edgedesk.v1', docRef: null, cloud: false, saving: false, pending: false,
+    loadLocal() { try { const raw = localStorage.getItem(this.key); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } },
+    saveLocal(data) { try { localStorage.setItem(this.key, JSON.stringify(data)); } catch (e) { /* storage unavailable */ } },
+    snapshot() {
+      return { v: 1, updatedAt: Date.now(), settings: S.settings, desk: S.desk, watch: Array.from(S.watch), seriesCache: S.seriesCache };
+    },
+    apply(data) {
+      if (!data) return;
+      if (data.settings) S.settings = Object.assign({}, DEFAULTS, data.settings);
+      if (data.desk) S.desk = normalizeDesk(data.desk);
+      if (Array.isArray(data.watch)) S.watch = new Set(data.watch);
+      if (data.seriesCache) S.seriesCache = Object.assign({}, data.seriesCache, S.seriesCache);
+    },
+    save: null,
+    async initCloud() {
+      if (!window.claude || typeof window.claude.use !== 'function') return null;
+      try {
+        const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
+        if (!db || !user) return null;
+        const id = await user.id();
+        if (!id) return null;
+        this.docRef = db.doc('data/users/' + id + '/desk');
+        const snap = await this.docRef.get();
+        this.cloud = true;
+        return snap.exists ? snap.data() : {};
+      } catch (e) { return null; }
+    },
+    async flush(data) {
+      if (!this.docRef) return;
+      if (this.saving) { this.pending = true; return; }
+      this.saving = true;
+      try { await this.docRef.set(data); } catch (e) { /* keep local copy */ }
+      this.saving = false;
+      if (this.pending) { this.pending = false; this.flush(this.snapshot()); }
+    }
+  };
+  Persist.save = U.debounce(function () {
+    const snap = Persist.snapshot();
+    Persist.saveLocal(snap);
+    Persist.flush(snap);
+  }, 1200);
+
+  function normalizeDesk(d) {
+    const base = newDesk(S.settings.bankroll);
+    if (!d) return base;
+    return {
+      cash: U.num(d.cash, base.cash), start: U.num(d.start, base.start), realized: U.num(d.realized, 0), fees: U.num(d.fees, 0),
+      positions: d.positions && typeof d.positions === 'object' ? d.positions : {},
+      orders: Array.isArray(d.orders) ? d.orders : [],
+      fills: Array.isArray(d.fills) ? d.fills.slice(0, 300) : [],
+      equity: Array.isArray(d.equity) ? d.equity.slice(-400) : [],
+      createdAt: d.createdAt || Date.now()
+    };
+  }
+  function newDesk(bankroll) {
+    return { cash: bankroll, start: bankroll, realized: 0, fees: 0, positions: {}, orders: [], fills: [], equity: [], createdAt: Date.now() };
+  }
+
+  /* ---------- API (live) ---------- */
+  const API = {
+    PROD: 'https://api.elections.kalshi.com/trade-api/v2',
+    DEMO: 'https://demo-api.kalshi.co/trade-api/v2',
+    bucket: { tokens: 10, cap: 10, rate: 5, t: Date.now() },
+    relayRoot(opts) {
+      if (opts && opts.direct) return '';
+      const relay = (S.settings.relayUrl || '').trim().replace(/\/+$/, '');
+      if (relay) return relay;
+      if ((S.sameOrigin || (opts && opts.sameOrigin)) && /^https?:$/.test(location.protocol)) return location.origin;
+      return '';
+    },
+    base(opts) {
+      const root = this.relayRoot(opts);
+      if (root) return root + (S.settings.env === 'demo' ? '/demo' : '') + '/trade-api/v2';
+      return S.settings.env === 'demo' ? this.DEMO : this.PROD;
+    },
+    url(path, params, opts) {
+      const u = new URL(this.base(opts) + path);
+      for (const k in (params || {})) { const v = params[k]; if (v !== undefined && v !== null && v !== '') u.searchParams.set(k, String(v)); }
+      if (this.relayRoot(opts)) {
+        if (S.settings.relayKey) u.searchParams.set('k', S.settings.relayKey);
+        if (opts && opts.slim && S.settings.slim) u.searchParams.set('slim', '1');
+      }
+      return u.toString();
+    },
+    async take() {
+      const b = this.bucket, now = Date.now();
+      b.tokens = Math.min(b.cap, b.tokens + (now - b.t) / 1000 * b.rate); b.t = now;
+      if (b.tokens >= 1) { b.tokens -= 1; return; }
+      const wait = (1 - b.tokens) / b.rate * 1000;
+      await sleep(wait); b.tokens = 0; b.t = Date.now();
+    },
+    async get(path, params, opts) {
+      opts = opts || {};
+      await this.take();
+      const url = this.url(path, params, opts);
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const ctl = new AbortController();
+        const to = setTimeout(() => ctl.abort(), opts.timeout || 15000);
+        try {
+          const res = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
+          clearTimeout(to);
+          if (res.status === 429) { lastErr = err('rate', 'Rate limited by the API', 429); await sleep(700 * Math.pow(2, attempt) + Math.random() * 400); continue; }
+          if (!res.ok) {
+            let detail = '';
+            try { const j = await res.json(); detail = (j && (j.message || j.error)) ? String(j.message || j.error) : ''; } catch (e) { /* no body */ }
+            throw err('http', 'HTTP ' + res.status + (detail ? ' · ' + detail : ''), res.status);
+          }
+          const data = await res.json();
+          S.health.lastOk = Date.now(); S.health.errors = 0;
+          return data;
+        } catch (e) {
+          clearTimeout(to);
+          if (e && e.kind) { if (e.kind === 'rate') { lastErr = e; continue; } throw e; }
+          if (e && e.name === 'AbortError') throw err('timeout', 'The request timed out');
+          throw err('network', 'Browser could not reach the API (blocked, offline, or no CORS headers)');
+        }
+      }
+      throw lastErr || err('rate', 'Rate limited');
+    }
+  };
+  function err(kind, message, status) { const e = new Error(message); e.kind = kind; e.status = status; return e; }
+  function isAuthErr(e) { return !!(e && (e.status === 401 || e.status === 403 || e.kind === 'auth')); }
+
+  /* ---------- data source abstraction ---------- */
+  const DS = {
+    isSim() { return S.mode === 'sim'; },
+    async status() {
+      if (this.isSim()) return S.sim.status;
+      return API.get('/exchange/status', {}, { timeout: 8000 });
+    },
+    async eventsPage(cursor) {
+      if (this.isSim()) {
+        const events = Array.from(S.sim.events.values()).map(e => Object.assign({}, e, { _markets: e.markets.map(t => S.sim.markets.get(t)) }));
+        return { events: events, cursor: '' };
+      }
+      return API.get('/events', { status: 'open', with_nested_markets: true, limit: 200, cursor: cursor || undefined }, { slim: true });
+    },
+    async marketsByTickers(tickers) {
+      if (this.isSim()) return tickers.map(t => S.sim.markets.get(t)).filter(Boolean).map(m => Object.assign({}, m));
+      const res = await API.get('/markets', { tickers: tickers.join(','), limit: 100 }, { slim: true });
+      return (res.markets || []).map(m => N.market(m, S.universe.events.get(m.event_ticker))).filter(Boolean);
+    },
+    async market(ticker) {
+      if (this.isSim()) { const m = S.sim.markets.get(ticker); return m ? Object.assign({}, m) : null; }
+      const res = await API.get('/markets/' + encodeURIComponent(ticker));
+      const raw = res.market || res;
+      return N.market(raw, S.universe.events.get(raw.event_ticker));
+    },
+    async event(ticker) {
+      if (this.isSim()) return S.sim.events.get(ticker) || null;
+      const res = await API.get('/events/' + encodeURIComponent(ticker), {}, { slim: true });
+      const ne = N.event(res.event || res);
+      if (ne && res.markets && !ne.markets.length) ne.markets = res.markets.map(m => m.ticker);
+      return ne;
+    },
+    async book(ticker) {
+      if (this.isSim()) return S.sim.book(ticker);
+      return N.book(await API.get('/markets/' + encodeURIComponent(ticker) + '/orderbook', { depth: 30 }));
+    },
+    async trades(params) {
+      if (this.isSim()) return S.sim.trades(3 + Math.floor(Math.random() * 10));
+      const res = await API.get('/markets/trades', params);
+      return (res.trades || []).map(N.trade).filter(Boolean);
+    },
+    async marketTrades(ticker) {
+      if (this.isSim()) return S.sim.marketTrades(ticker, 24);
+      const res = await API.get('/markets/trades', { ticker: ticker, limit: 40 });
+      return (res.trades || []).map(N.trade).filter(Boolean);
+    },
+    async tradeHistory(ticker, sinceMs) {
+      if (this.isSim()) return S.sim.marketTrades(ticker, 200);
+      const out = [];
+      let cursor = '';
+      for (let p = 0; p < 3; p++) {
+        const res = await API.get('/markets/trades', { ticker: ticker, limit: 1000, min_ts: Math.floor(sinceMs / 1000), cursor: cursor || undefined });
+        for (const t of (res.trades || [])) { const nt = N.trade(t); if (nt) out.push(nt); }
+        cursor = res.cursor || '';
+        if (!cursor || !(res.trades || []).length) break;
+      }
+      return out;
+    },
+    async candles(m, period, startMs, endMs) {
+      if (this.isSim()) return S.sim.candles(m.ticker, period, startMs);
+      const start = Math.floor(startMs / 1000), end = Math.ceil(endMs / 1000);
+      try {
+        const res = await API.get('/markets/candlesticks', { market_tickers: m.ticker, period_interval: period, start_ts: start, end_ts: end });
+        const entry = (res.markets || [])[0];
+        if (entry) return N.candles(entry.candlesticks);
+        if (res.candlesticks) return N.candles(res.candlesticks);
+      } catch (e) { /* fall through to the series-scoped endpoint */ }
+      const res2 = await API.get('/series/' + encodeURIComponent(m.series) + '/markets/' + encodeURIComponent(m.ticker) + '/candlesticks', { period_interval: period, start_ts: start, end_ts: end });
+      return N.candles(res2.candlesticks);
+    },
+    async series(ticker) {
+      if (this.isSim()) return S.sim.seriesFees[ticker] || { fee_type: 'quadratic', fee_multiplier: 1 };
+      const res = await API.get('/series/' + encodeURIComponent(ticker));
+      const s = res.series || res;
+      return { fee_type: s.fee_type || 'quadratic', fee_multiplier: U.num(s.fee_multiplier, 1), title: s.title || '', category: s.category || '', at: Date.now() };
+    }
+  };
+
+  /* ---------- engine ---------- */
+  const Engine = {
+    async boot() {
+      setHealth('idle', 'Connecting');
+      const mode = S.settings.dataMode;
+      const relay = (S.settings.relayUrl || '').trim();
+      let ok = false, how = '';
+      S.sameOrigin = false;
+      if (mode === 'sim') { this.useSim('Simulated data selected in Setup'); return; }
+      if (S.ctx === 'artifact') { this.useSim('This copy runs inside Claude, which blocks outside network calls'); return; }
+      if (relay && mode !== 'direct') {
+        try { S.health.exchange = await API.get('/exchange/status', {}, { timeout: 10000 }); ok = true; how = 'relay'; }
+        catch (e) { S.health.lastErr = 'Relay: ' + e.message; }
+      }
+      if (!ok && !relay && mode !== 'direct' && S.ctx === 'hosted') {
+        // the page may be served by the Edge Desk worker, which relays on the same origin
+        try { S.health.exchange = await API.get('/exchange/status', {}, { timeout: 10000, sameOrigin: true }); ok = true; how = 'relay'; S.sameOrigin = true; }
+        catch (e) { S.health.lastErr = 'Same-origin relay: ' + e.message; }
+      }
+      if (!ok && mode !== 'relay') {
+        try { S.health.exchange = await API.get('/exchange/status', {}, { timeout: 8000, direct: true }); ok = true; how = 'direct'; }
+        catch (e) { if (!S.health.lastErr) S.health.lastErr = 'Direct: ' + e.message; }
+      }
+      if (ok) {
+        S.mode = 'live'; S.source = how;
+        setHealth('live', 'Live');
+        UI.renderStatus();
+        this.start();
+      } else {
+        this.useSim(relay ? 'The relay did not answer' : 'Kalshi blocks browser requests');
+      }
+    },
+    useSim(reason) {
+      S.mode = 'sim'; S.source = 'sim';
+      S.sim = SIM.create(7);
+      S.health.exchange = S.sim.status; S.health.simReason = reason;
+      setHealth('sim', 'Simulated');
+      UI.renderStatus();
+      this.start();
+    },
+    start() {
+      this.stop();
+      this.loadUniverse().then(() => { this.loop('markets', () => this.refreshTracked(), () => S.settings.pollMarkets * 1000); });
+      this.loop('tape', () => this.pollTape(), () => S.settings.pollTape * 1000);
+      this.loop('universe', () => this.loadUniverse(), () => Math.max(2, S.settings.universeRefreshMin) * 60000, true);
+      this.loop('sheet', () => this.pollSheet(), () => S.settings.pollBook * 1000);
+      this.loop('clock', () => UI.tickClock(), () => 1000);
+      if (S.mode === 'sim') this.loop('simtick', () => { S.sim.tick(); }, () => 3000);
+    },
+    stop() { for (const k in S.timers) clearTimeout(S.timers[k]); S.timers = {}; },
+    // Relay URL (or same-origin worker) the page is using, for display
+    relayLabel() { const r = (S.settings.relayUrl || '').trim(); return r ? r.replace(/^https?:\/\//, '') : (S.sameOrigin ? 'this site' : ''); },
+    loop(name, fn, every, delayFirst) {
+      const run = async () => {
+        if (!document.hidden || name === 'clock') { try { await fn(); } catch (e) { noteError(e); } }
+        S.timers[name] = setTimeout(run, every());
+      };
+      S.timers[name] = setTimeout(run, delayFirst ? every() : 0);
+    },
+    async loadUniverse() {
+      if (S.universe.loading) return;
+      S.universe.loading = true;
+      const ev = new Map(), mk = new Map();
+      let cursor = '', pages = 0;
+      const max = S.mode === 'sim' ? 1 : Math.max(1, S.settings.universePages);
+      const firstLoad = S.universe.markets.size === 0;
+      const publish = (done) => {
+        // Merge: on first load show pages as they arrive; on a refresh swap in the new set only when complete
+        if (!firstLoad && !done) return;
+        for (const t of S.extras) { const old = S.universe.markets.get(t); if (old && !mk.has(t)) mk.set(t, old); }
+        for (const [k, e] of S.universe.events) if (!ev.has(k) && e.markets.some(t => mk.has(t))) ev.set(k, e);
+        // keep fresher quotes from the tracked-refresh loop for markets that reappear
+        for (const [t, nm] of mk) { const old = S.universe.markets.get(t); if (old && old.updated > nm.updated) { if (!nm.rules && old.rules) nm.rules = old.rules; if (!nm.rules2 && old.rules2) nm.rules2 = old.rules2; } }
+        S.universe = { events: new Map(ev), markets: new Map(mk), loadedAt: Date.now(), pages: pages, loading: !done };
+        Scanner.run();
+        Desk.markAll();
+        UI.onUniverse();
+      };
+      try {
+        for (let p = 0; p < max; p++) {
+          if (S.mode === 'live') setHealth('live', 'Loading markets ' + (p + 1) + '/' + max);
+          const res = await DS.eventsPage(cursor);
+          for (const e of (res.events || [])) {
+            const ne = S.mode === 'sim' ? Object.assign({}, e, { markets: e.markets.slice() }) : N.event(e);
+            if (!ne) continue;
+            const rawMarkets = S.mode === 'sim' ? e._markets : (e.markets || []);
+            const kept = [];
+            for (const m of rawMarkets) {
+              const nm = S.mode === 'sim' ? Object.assign({}, m) : N.market(m, ne);
+              if (nm && nm.status === 'active') { mk.set(nm.ticker, nm); kept.push(nm.ticker); }
+            }
+            ne.markets = kept;
+            if (S.mode === 'sim') delete ne._markets;
+            ev.set(ne.ticker, ne);
+          }
+          pages++;
+          cursor = res.cursor || '';
+          if (cursor && p < max - 1) publish(false);
+          if (!cursor) break;
+        }
+        S.universe.complete = !cursor;
+        publish(true);
+        if (S.mode === 'live') setHealth('live', 'Live');
+      } catch (e) {
+        if (pages > 0) publish(true); else S.universe.loading = false;
+        noteError(e);
+      }
+    },
+    trackedTickers() {
+      const set = new Set();
+      for (const t of S.watch) set.add(t);
+      for (const k in S.desk.positions) set.add(S.desk.positions[k].ticker);
+      for (const o of S.desk.orders) set.add(o.ticker);
+      if (S.sel) set.add(S.sel);
+      let n = 0;
+      for (const op of S.scanner.ops) { for (const t of op.tickers) { if (n >= 60) break; set.add(t); n++; } }
+      return Array.from(set).filter(t => S.universe.markets.has(t) || S.extras.has(t));
+    },
+    async refreshTracked() {
+      const list = this.trackedTickers();
+      if (!list.length) return;
+      const changed = [];
+      for (let i = 0; i < list.length; i += 40) {
+        const chunk = list.slice(i, i + 40);
+        const ms = await DS.marketsByTickers(chunk);
+        for (const nm of ms) { const c = applyMarket(nm); if (c) changed.push(c); }
+      }
+      if (changed.length) { Scanner.run(); Desk.markAll(); UI.onPrices(changed); }
+      Desk.checkOrders();
+    },
+    async pollTape() {
+      if (S.tape.paused || S.blocked.trades) return;
+      const params = { limit: 100 };
+      if (S.tape.lastTs) params.min_ts = Math.max(0, Math.floor(S.tape.lastTs / 1000) - 2);
+      let list;
+      try { list = await DS.trades(params); }
+      catch (e) { if (isAuthErr(e)) { S.blocked.trades = true; UI.onTape([]); return; } throw e; }
+      const fresh = [];
+      for (const t of list) { if (S.tape.seen.has(t.id)) continue; S.tape.seen.add(t.id); fresh.push(t); }
+      if (!fresh.length) return;
+      fresh.sort((a, b) => b.t - a.t);
+      S.tape.trades = fresh.concat(S.tape.trades).slice(0, 600);
+      S.tape.lastTs = Math.max(S.tape.lastTs || 0, fresh[0].t);
+      if (S.tape.seen.size > 8000) { S.tape.seen = new Set(S.tape.trades.map(t => t.id)); }
+      for (const t of fresh) { const m = S.universe.markets.get(t.ticker); if (m && t.yes !== null) { m.last = t.yes; m.updated = t.t; } }
+      UI.onTape(fresh);
+    },
+    async pollSheet() {
+      if (!S.sel || $('sheet').hidden) return;
+      const m = S.universe.markets.get(S.sel);
+      if (!m) return;
+      const cyc = (S.sheet.cycle = (S.sheet.cycle || 0) + 1);
+      if (!S.blocked.book) {
+        try { const book = await DS.book(m.ticker); if (S.sel !== m.ticker) return; S.sheet.book = book; }
+        catch (e) { if (isAuthErr(e)) { S.blocked.book = true; S.sheet.book = null; } else throw e; }
+      }
+      if (cyc % 2 === 0) {
+        const [nm, trades] = await Promise.all([DS.market(m.ticker), DS.marketTrades(m.ticker).catch(e => { if (isAuthErr(e)) { S.blocked.trades = true; return S.sheet.trades; } throw e; })]);
+        if (S.sel !== m.ticker) return;
+        if (nm) { nm.rules = nm.rules || m.rules; nm.rules2 = nm.rules2 || m.rules2; const c = applyMarket(nm); if (c) UI.onPrices([c]); }
+        S.sheet.trades = trades;
+      }
+      if (Date.now() - S.sheet.candlesAt > 120000) this.loadCandles();
+      UI.renderSheetLive();
+    },
+    rangeSpec(m) {
+      const now = Date.now();
+      const r = S.sheet.range;
+      let period = 60, start = now - 7 * 86400000;
+      if (r === '1D') { period = 1; start = now - 86400000; }
+      else if (r === '1M') { period = 60; start = now - 30 * 86400000; }
+      else if (r === 'All') { period = 1440; start = (m.open || now - 180 * 86400000) - 86400000; }
+      if (m.open && start < m.open - 86400000) start = m.open - 86400000;
+      return { period: period, start: start, now: now };
+    },
+    async loadCandles() {
+      const m = S.universe.markets.get(S.sel);
+      if (!m) return;
+      const spec = this.rangeSpec(m);
+      S.sheet.candlesAt = spec.now;
+      S.sheet.candleSource = '';
+      try {
+        if (S.blocked.candles) throw err('auth', 'candles need authentication', 401);
+        const candles = await DS.candles(m, spec.period, spec.start, spec.now);
+        if (S.sel !== m.ticker) return;
+        S.sheet.candles = candles;
+        S.sheet.candleSource = 'candles';
+        UI.renderChart();
+        return;
+      } catch (e) {
+        if (isAuthErr(e)) S.blocked.candles = true; else if (S.mode === 'live') noteError(e);
+      }
+      // Fallback: build a price series from the public trade history
+      try {
+        const trades = await DS.tradeHistory(m.ticker, spec.start);
+        if (S.sel !== m.ticker) return;
+        S.sheet.candles = A.candlesFromTrades(trades, spec.period === 1 ? 300000 : spec.period === 60 ? 3600000 : 86400000);
+        S.sheet.candleSource = trades.length ? 'trades' : 'none';
+        UI.renderChart();
+      } catch (e) { if (S.sel === m.ticker) { S.sheet.candles = []; S.sheet.candleSource = 'none'; UI.renderChart(); } noteError(e); }
+    },
+    async openMarket(ticker) {
+      let m = S.universe.markets.get(ticker);
+      if (!m) {
+        try {
+          m = await DS.market(ticker);
+          if (!m) { UI.toast('Market ' + ticker + ' not found'); return; }
+          S.universe.markets.set(m.ticker, m); S.extras.add(m.ticker);
+          if (!S.universe.events.has(m.event)) { try { const ev = await DS.event(m.event); if (ev) { if (!ev.markets.includes(m.ticker)) ev.markets.push(m.ticker); S.universe.events.set(ev.ticker, ev); } } catch (e) { /* optional */ } }
+        } catch (e) { noteError(e); UI.toast('Could not load ' + ticker); return; }
+      }
+      S.sel = ticker;
+      S.sheet = Object.assign(S.sheet, { book: null, trades: [], candles: [], candlesAt: 0, ai: null, aiBusy: false, calcQ: null, cycle: 0 });
+      S.sheet.ticket = { side: 'yes', type: 'market', qty: 10, price: null };
+      UI.openSheet();
+      this.ensureSeries(m.series);
+      if (!m.rules && S.mode === 'live') { DS.market(ticker).then(nm => { if (nm) { applyMarket(nm); if (S.sel === ticker) UI.renderSheet(); } }).catch(noteError); }
+      // immediate data pulls
+      (async () => {
+        const [book, trades] = await Promise.all([
+          S.blocked.book ? Promise.resolve(null) : DS.book(ticker).catch(e => { if (isAuthErr(e)) S.blocked.book = true; else noteError(e); return null; }),
+          S.blocked.trades ? Promise.resolve([]) : DS.marketTrades(ticker).catch(e => { if (isAuthErr(e)) S.blocked.trades = true; else noteError(e); return []; })
+        ]);
+        if (S.sel !== ticker) return;
+        S.sheet.book = book; S.sheet.trades = trades;
+        UI.renderSheetLive();
+      })();
+      this.loadCandles();
+    },
+    async ensureSeries(series) {
+      if (!series) return;
+      const c = S.seriesCache[series];
+      if (c && c.at && Date.now() - c.at < 86400000) return c;
+      try {
+        const info = await DS.series(series);
+        S.seriesCache[series] = Object.assign({ at: Date.now() }, info);
+        Persist.save();
+        if (S.sel && S.universe.markets.get(S.sel) && S.universe.markets.get(S.sel).series === series) UI.renderSheet();
+        return info;
+      } catch (e) { S.seriesCache[series] = { fee_type: 'quadratic', fee_multiplier: 1, at: Date.now(), unknown: true }; return null; }
+    },
+    async testConnection() {
+      const out = { relay: null, same: null, direct: null };
+      const relay = (S.settings.relayUrl || '').trim();
+      if (relay) { try { const st = await API.get('/exchange/status', {}, { timeout: 10000 }); out.relay = { ok: true, st: st }; } catch (e) { out.relay = { ok: false, msg: e.message }; } }
+      if (S.ctx === 'hosted' && !relay) { try { const st = await API.get('/exchange/status', {}, { timeout: 10000, sameOrigin: true }); out.same = { ok: true, st: st }; } catch (e) { out.same = { ok: false, msg: e.message }; } }
+      if (S.ctx !== 'artifact') { try { const st = await API.get('/exchange/status', {}, { timeout: 8000, direct: true }); out.direct = { ok: true, st: st }; } catch (e) { out.direct = { ok: false, msg: e.message }; } }
+      return out;
+    }
+  };
+
+  function applyMarket(nm) {
+    if (!nm) return null;
+    const old = S.universe.markets.get(nm.ticker);
+    if (old) {
+      // preserve fields the slim payload may lack
+      if (!nm.rules && old.rules) nm.rules = old.rules;
+      if (!nm.rules2 && old.rules2) nm.rules2 = old.rules2;
+      if (!nm.title && old.title) nm.title = old.title;
+    }
+    S.universe.markets.set(nm.ticker, nm);
+    if (nm.result && nm.result !== 'scalar') Desk.settle(nm.ticker, nm.result);
+    if (!old) return { ticker: nm.ticker, dir: 0 };
+    const a = old.mid, b = nm.mid;
+    let dir = 0;
+    if (a !== null && b !== null && Math.abs(b - a) > 1e-6) dir = b > a ? 1 : -1;
+    const changed = dir !== 0 || old.ya !== nm.ya || old.yb !== nm.yb || old.last !== nm.last || old.vol !== nm.vol;
+    return changed ? { ticker: nm.ticker, dir: dir } : null;
+  }
+
+  function setHealth(status, text) {
+    S.health.status = status; S.health.text = text;
+    if (window.UI) UI.renderStatus();
+  }
+  function noteError(e) {
+    if (!e) return;
+    S.health.errors = (S.health.errors || 0) + 1;
+    S.health.lastErr = e.message || String(e);
+    if (S.mode === 'live' && S.health.errors >= 3) setHealth('stale', 'Stale');
+    if (window.console) console.warn('[Edge Desk]', e.message || e);
+  }
+
+  /* ---------- paper desk ---------- */
+  const Desk = {
+    feeInfo(m) { return A.feeInfoFor(m, S.universe.events.get(m.event), S.seriesCache[m.series], S.settings); },
+    quote(m, side, kind) {
+      // best executable price for buying `side` (ask) or selling (bid)
+      if (side === 'yes') return kind === 'sell' ? (m.hasBid ? m.yb : null) : (m.hasAsk ? m.ya : null);
+      return kind === 'sell' ? (m.hasAsk ? U.round(1 - m.ya, 4) : null) : (m.hasBid ? U.round(1 - m.yb, 4) : null);
+    },
+    preview(m, side, qty, type, limitPrice, book) {
+      qty = Math.max(0, Math.floor(U.num(qty, 0)));
+      const info = this.feeInfo(m);
+      if (type === 'limit') {
+        const price = U.clamp(U.num(limitPrice, 0), 0.01, 0.99);
+        const fee = F.calc(qty, price, 'maker', info, S.settings.rounding);
+        const crosses = side === 'yes' ? (m.hasAsk && price >= m.ya) : (m.hasBid && price >= U.round(1 - m.yb, 4));
+        return { qty: qty, price: price, fee: fee, cost: qty * price + fee, filled: qty, crosses: crosses, kind: 'maker', note: crosses ? 'This price crosses the book; it would fill immediately as a taker.' : 'Rests until the market trades through ' + U.cents(price) + '.' };
+      }
+      let fill = null;
+      if (book) {
+        const levels = side === 'yes' ? book.yesAsks : book.noAsks;
+        fill = A.fillFromBook(levels, qty);
+      }
+      if (!fill || fill.filled === 0) {
+        const p = this.quote(m, side, 'buy');
+        if (p === null) return { qty: qty, price: null, fee: 0, cost: 0, filled: 0, kind: 'taker', note: 'No offers on this side right now.' };
+        fill = { filled: qty, cost: qty * p, avg: p, unfilled: 0 };
+      }
+      const fee = F.calc(fill.filled, fill.avg, 'taker', info, S.settings.rounding);
+      return { qty: qty, price: fill.avg, fee: fee, cost: fill.cost + fee, filled: fill.filled, unfilled: fill.unfilled, kind: 'taker', note: fill.unfilled > 0 ? 'Only ' + U.compact(fill.filled) + ' contracts are offered at these levels.' : 'Fills against the live book; average price ' + U.cents(fill.avg) + '.' };
+    },
+    buy(m, side, qty, type, limitPrice, book) {
+      const pv = this.preview(m, side, qty, type, limitPrice, book);
+      if (pv.filled <= 0) return { ok: false, msg: pv.note };
+      if (type === 'limit' && !pv.crosses) {
+        const o = { id: U.uid(), ticker: m.ticker, side: side, price: pv.price, qty: pv.qty, createdAt: Date.now(), title: label(m) };
+        S.desk.orders.push(o); Persist.save();
+        return { ok: true, msg: 'Resting ' + side.toUpperCase() + ' bid for ' + pv.qty + ' at ' + U.cents(pv.price), order: o };
+      }
+      if (pv.cost > S.desk.cash + 1e-9) return { ok: false, msg: 'Not enough cash: needs ' + U.money(pv.cost) + ', you have ' + U.money(S.desk.cash) };
+      const key = m.ticker + '|' + side;
+      const pos = S.desk.positions[key] || { ticker: m.ticker, side: side, qty: 0, cost: 0, openedAt: Date.now(), title: label(m) };
+      pos.qty += pv.filled; pos.cost += pv.cost; pos.title = label(m);
+      S.desk.positions[key] = pos;
+      S.desk.cash -= pv.cost; S.desk.fees += pv.fee;
+      this.fill({ action: 'buy', ticker: m.ticker, side: side, qty: pv.filled, price: pv.price, fee: pv.fee, title: label(m) });
+      this.markAll(); Persist.save();
+      return { ok: true, msg: 'Bought ' + pv.filled + ' ' + side.toUpperCase() + ' at ' + U.cents(pv.price) + (pv.fee ? ' (+' + U.money(pv.fee) + ' fee)' : '') };
+    },
+    sell(key, qty) {
+      const pos = S.desk.positions[key]; if (!pos) return { ok: false, msg: 'No position' };
+      const m = S.universe.markets.get(pos.ticker); if (!m) return { ok: false, msg: 'Market not loaded' };
+      qty = Math.min(pos.qty, Math.max(1, Math.floor(U.num(qty, pos.qty))));
+      const px = this.quote(m, pos.side, 'sell');
+      if (px === null) return { ok: false, msg: 'No bids to sell into right now' };
+      const fee = F.calc(qty, px, 'taker', this.feeInfo(m), S.settings.rounding);
+      const proceeds = qty * px - fee;
+      const basis = pos.cost * (qty / pos.qty);
+      pos.qty -= qty; pos.cost -= basis;
+      if (pos.qty <= 0) delete S.desk.positions[key];
+      S.desk.cash += proceeds; S.desk.realized += proceeds - basis; S.desk.fees += fee;
+      this.fill({ action: 'sell', ticker: pos.ticker, side: pos.side, qty: qty, price: px, fee: fee, pnl: proceeds - basis, title: pos.title });
+      this.markAll(); Persist.save();
+      return { ok: true, msg: 'Sold ' + qty + ' ' + pos.side.toUpperCase() + ' at ' + U.cents(px) + ' · ' + U.money(proceeds - basis, { plus: true }) };
+    },
+    settle(ticker, result) {
+      let touched = false;
+      for (const key in S.desk.positions) {
+        const pos = S.desk.positions[key];
+        if (pos.ticker !== ticker) continue;
+        const won = pos.side === result;
+        const payout = won ? pos.qty : 0;
+        S.desk.cash += payout; S.desk.realized += payout - pos.cost;
+        this.fill({ action: 'settle', ticker: ticker, side: pos.side, qty: pos.qty, price: won ? 1 : 0, fee: 0, pnl: payout - pos.cost, title: pos.title });
+        delete S.desk.positions[key]; touched = true;
+      }
+      const before = S.desk.orders.length;
+      S.desk.orders = S.desk.orders.filter(o => o.ticker !== ticker);
+      if (touched || before !== S.desk.orders.length) { Persist.save(); UI.toast(ticker + ' settled ' + result.toUpperCase()); }
+    },
+    checkOrders() {
+      let changed = false;
+      for (const o of S.desk.orders.slice()) {
+        const m = S.universe.markets.get(o.ticker); if (!m) continue;
+        const ask = this.quote(m, o.side, 'buy');
+        if (ask !== null && ask <= o.price) {
+          const info = this.feeInfo(m);
+          const fee = F.calc(o.qty, o.price, 'maker', info, S.settings.rounding);
+          const cost = o.qty * o.price + fee;
+          if (cost > S.desk.cash) { UI.toast('Resting order skipped: not enough cash'); S.desk.orders = S.desk.orders.filter(x => x.id !== o.id); changed = true; continue; }
+          const key = o.ticker + '|' + o.side;
+          const pos = S.desk.positions[key] || { ticker: o.ticker, side: o.side, qty: 0, cost: 0, openedAt: Date.now(), title: o.title };
+          pos.qty += o.qty; pos.cost += cost; S.desk.positions[key] = pos;
+          S.desk.cash -= cost; S.desk.fees += fee;
+          this.fill({ action: 'buy', ticker: o.ticker, side: o.side, qty: o.qty, price: o.price, fee: fee, title: o.title, maker: true });
+          S.desk.orders = S.desk.orders.filter(x => x.id !== o.id);
+          UI.toast('Resting order filled: ' + o.qty + ' ' + o.side.toUpperCase() + ' at ' + U.cents(o.price));
+          changed = true;
+        }
+      }
+      if (changed) { this.markAll(); Persist.save(); UI.onDesk(); }
+    },
+    cancel(id) { S.desk.orders = S.desk.orders.filter(o => o.id !== id); Persist.save(); },
+    fill(f) { f.t = Date.now(); f.id = U.uid(); S.desk.fills.unshift(f); if (S.desk.fills.length > 300) S.desk.fills.length = 300; },
+    value() {
+      let pos = 0;
+      for (const key in S.desk.positions) {
+        const p = S.desk.positions[key]; const m = S.universe.markets.get(p.ticker);
+        const bid = m ? this.quote(m, p.side, 'sell') : null;
+        pos += p.qty * (bid !== null ? bid : (p.cost / p.qty));
+      }
+      return { positions: pos, equity: S.desk.cash + pos };
+    },
+    markAll() {
+      const v = this.value();
+      const eq = S.desk.equity;
+      const last = eq[eq.length - 1];
+      const now = Date.now();
+      if (!last || (Math.abs(last.v - v.equity) > 0.005 && now - last.t > 30000) || now - last.t > 600000) {
+        eq.push({ t: now, v: U.round(v.equity, 2) });
+        if (eq.length > 400) eq.splice(0, eq.length - 400);
+        Persist.save();
+      }
+      UI.onDesk();
+    },
+    reset(bankroll) { S.desk = newDesk(bankroll); S.settings.bankroll = bankroll; Persist.save(); UI.onDesk(); }
+  };
+  function label(m) { const ev = S.universe.events.get(m.event); if (m.title) return m.title; return (ev ? ev.title + ' · ' : '') + (m.yesSub || m.ticker); }
+
+  /* ---------- charts (canvas) ---------- */
+  const Chart = {
+    tokens() {
+      const cs = getComputedStyle(document.documentElement);
+      const g = (k) => cs.getPropertyValue(k).trim();
+      return { fg: g('--fg'), fg2: g('--fg-2'), fg3: g('--fg-3'), line: g('--line'), line2: g('--line-2'), yes: g('--yes'), no: g('--no'), up: g('--up'), down: g('--down'), bg: g('--bg-elev'), ink: g('--ink') };
+    },
+    setup(canvas, h) {
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      const w = canvas.clientWidth || canvas.parentElement.clientWidth || 320;
+      const height = h || canvas.height || 160;
+      canvas.width = Math.round(w * dpr); canvas.height = Math.round(height * dpr);
+      canvas.style.height = height + 'px';
+      const ctx = canvas.getContext && canvas.getContext('2d');
+      if (!ctx) return null;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return { ctx: ctx, w: w, h: height };
+    },
+    font(ctx, size, weight) { ctx.font = (weight || 400) + ' ' + (size || 11) + 'px ' + "'Archivo', system-ui, sans-serif"; },
+    price(canvas, tip, candles, opts) {
+      const s = this.setup(canvas, 190); if (!s) return;
+      const { ctx, w, h } = s; const T = this.tokens();
+      ctx.clearRect(0, 0, w, h);
+      const pad = { l: 8, r: 44, t: 10, b: 20 }, volH = 34;
+      const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b - volH - 6;
+      if (!candles || candles.length < 2) { this.font(ctx, 12); ctx.fillStyle = T.fg3; ctx.fillText(candles && candles.length === 1 ? 'One data point so far' : 'No price history yet', pad.l, pad.t + 16); canvas._hit = null; return; }
+      let lo = Infinity, hi = -Infinity, maxV = 0;
+      for (const c of candles) { lo = Math.min(lo, c.l, c.c); hi = Math.max(hi, c.h, c.c); maxV = Math.max(maxV, c.vol || 0); }
+      const span = Math.max(0.04, hi - lo);
+      lo = Math.max(0, lo - span * 0.15); hi = Math.min(1, hi + span * 0.15);
+      const t0 = candles[0].t, t1 = candles[candles.length - 1].t;
+      const x = (t) => pad.l + (t - t0) / Math.max(1, t1 - t0) * pw;
+      const y = (p) => pad.t + (1 - (p - lo) / (hi - lo)) * ph;
+      // grid + y labels
+      ctx.strokeStyle = T.line2; ctx.lineWidth = 1; this.font(ctx, 10.5); ctx.fillStyle = T.fg3; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      for (const tk of U.niceTicks(lo, hi, 4)) { const yy = Math.round(y(tk)) + 0.5; ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(pad.l + pw, yy); ctx.stroke(); ctx.fillText(Math.round(tk * 100) + '¢', pad.l + pw + 6, yy); }
+      // x labels
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      const nX = w < 420 ? 3 : 5;
+      for (let i = 0; i <= nX; i++) { const t = t0 + (t1 - t0) * i / nX; const d = new Date(t); const lbl = (t1 - t0) <= 2 * 86400000 ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); ctx.fillText(lbl, U.clamp(x(t), pad.l + 22, pad.l + pw - 22), h - 5); }
+      // volume
+      const vb = pad.t + ph + 6 + volH;
+      ctx.fillStyle = T.line;
+      const bw = Math.max(1, pw / candles.length - 1);
+      for (const c of candles) { if (!c.vol) continue; const vh = (c.vol / maxV) * volH; ctx.fillRect(x(c.t) - bw / 2, vb - vh, bw, vh); }
+      // area + line
+      ctx.beginPath(); ctx.moveTo(x(candles[0].t), y(candles[0].c));
+      for (const c of candles) ctx.lineTo(x(c.t), y(c.c));
+      const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + ph);
+      grad.addColorStop(0, hexA(T.yes, 0.22)); grad.addColorStop(1, hexA(T.yes, 0.0));
+      ctx.lineTo(x(t1), pad.t + ph); ctx.lineTo(x(t0), pad.t + ph); ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x(candles[0].t), y(candles[0].c));
+      for (const c of candles) ctx.lineTo(x(c.t), y(c.c));
+      ctx.strokeStyle = T.yes; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
+      // endpoint
+      const lastC = candles[candles.length - 1];
+      ctx.beginPath(); ctx.arc(x(lastC.t), y(lastC.c), 3.5, 0, Math.PI * 2); ctx.fillStyle = T.yes; ctx.fill();
+      ctx.fillStyle = T.bg; ctx.fillRect(pad.l + pw + 2, y(lastC.c) - 8, 40, 16);
+      ctx.fillStyle = T.yes; this.font(ctx, 11, 700); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(U.cents(lastC.c), pad.l + pw + 6, y(lastC.c));
+      canvas._hit = { candles: candles, x: x, y: y, pad: pad, pw: pw, ph: ph };
+      this.bindHover(canvas, tip, (px) => {
+        const hit = canvas._hit; if (!hit) return null;
+        let best = null, bd = Infinity;
+        for (const c of hit.candles) { const d = Math.abs(hit.x(c.t) - px); if (d < bd) { bd = d; best = c; } }
+        if (!best) return null;
+        return { x: hit.x(best.t), y: hit.y(best.c), text: U.cents(best.c) + ' · ' + U.dateShort(best.t) + (best.vol ? ' · ' + U.compact(best.vol) + ' vol' : '') };
+      });
+    },
+    depth(canvas, tip, book) {
+      const s = this.setup(canvas, 120); if (!s) return;
+      const { ctx, w, h } = s; const T = this.tokens();
+      ctx.clearRect(0, 0, w, h);
+      const pad = { l: 8, r: 8, t: 8, b: 18 };
+      const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+      if (!book || (!book.yesBids.length && !book.yesAsks.length)) { this.font(ctx, 12); ctx.fillStyle = T.fg3; ctx.fillText('Empty book', pad.l, pad.t + 14); canvas._hit = null; return; }
+      const bids = book.yesBids.slice(0, 20), asks = book.yesAsks.slice(0, 20);
+      let cum = 0; const bidPts = bids.map(([p, q]) => { cum += q; return { p: p, c: cum }; });
+      cum = 0; const askPts = asks.map(([p, q]) => { cum += q; return { p: p, c: cum }; });
+      const maxC = Math.max(bidPts.length ? bidPts[bidPts.length - 1].c : 0, askPts.length ? askPts[askPts.length - 1].c : 0, 1);
+      const lo = Math.max(0, Math.min(bids.length ? bids[bids.length - 1][0] : 1, asks.length ? asks[0][0] : 1) - 0.02);
+      const hi = Math.min(1, Math.max(asks.length ? asks[asks.length - 1][0] : 0, bids.length ? bids[0][0] : 0) + 0.02);
+      const x = (p) => pad.l + (p - lo) / Math.max(0.02, hi - lo) * pw;
+      const y = (c) => pad.t + (1 - c / maxC) * ph;
+      const step = (pts, color, dir) => {
+        if (!pts.length) return;
+        ctx.beginPath();
+        const first = pts[0];
+        const base = pad.t + ph;
+        ctx.moveTo(x(first.p), base);
+        let prev = first;
+        for (const pt of pts) { ctx.lineTo(x(prev.p), y(pt.c)); ctx.lineTo(x(pt.p), y(pt.c)); prev = pt; }
+        ctx.lineTo(x(prev.p), base); ctx.closePath();
+        ctx.fillStyle = hexA(color, 0.18); ctx.fill();
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+      };
+      step(bidPts, T.yes, -1); step(askPts, T.no, 1);
+      // x labels
+      this.font(ctx, 10.5); ctx.fillStyle = T.fg3; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      for (const tk of U.niceTicks(lo, hi, 4)) if (tk >= lo && tk <= hi) ctx.fillText(Math.round(tk * 100) + '¢', x(tk), h - 4);
+      this.font(ctx, 10, 700); ctx.textAlign = 'left'; ctx.fillStyle = T.yes; ctx.fillText('YES bids', pad.l + 2, pad.t + 10);
+      ctx.textAlign = 'right'; ctx.fillStyle = T.no; ctx.fillText('YES offers', pad.l + pw - 2, pad.t + 10);
+      canvas._hit = { bidPts: bidPts, askPts: askPts, x: x, y: y };
+      this.bindHover(canvas, tip, (px) => {
+        const hit = canvas._hit; if (!hit) return null;
+        const all = hit.bidPts.map(p => Object.assign({ side: 'bid' }, p)).concat(hit.askPts.map(p => Object.assign({ side: 'offer' }, p)));
+        let best = null, bd = Infinity;
+        for (const pt of all) { const d = Math.abs(hit.x(pt.p) - px); if (d < bd) { bd = d; best = pt; } }
+        if (!best) return null;
+        return { x: hit.x(best.p), y: hit.y(best.c), text: U.compact(best.c) + ' contracts ' + (best.side === 'bid' ? 'bid at or above ' : 'offered at or below ') + U.cents(best.p) };
+      });
+    },
+    spark(canvas, tip, pts) {
+      const s = this.setup(canvas, 110); if (!s) return;
+      const { ctx, w, h } = s; const T = this.tokens();
+      ctx.clearRect(0, 0, w, h);
+      const pad = { l: 8, r: 56, t: 10, b: 8 };
+      const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+      if (!pts || pts.length < 2) { this.font(ctx, 12); ctx.fillStyle = T.fg3; ctx.fillText('Equity history appears after your first paper trade', pad.l, pad.t + 14); canvas._hit = null; return; }
+      let lo = Infinity, hi = -Infinity; for (const p of pts) { lo = Math.min(lo, p.v); hi = Math.max(hi, p.v); }
+      if (hi - lo < 1) { lo -= 1; hi += 1; }
+      const span = hi - lo; lo -= span * 0.1; hi += span * 0.1;
+      const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+      const x = (t) => pad.l + (t - t0) / Math.max(1, t1 - t0) * pw;
+      const y = (v) => pad.t + (1 - (v - lo) / (hi - lo)) * ph;
+      const start = pts[0].v, end = pts[pts.length - 1].v;
+      const color = end >= start ? T.up : T.down;
+      ctx.strokeStyle = T.line2; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(pad.l, Math.round(y(start)) + 0.5); ctx.lineTo(pad.l + pw, Math.round(y(start)) + 0.5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x(pts[0].t), y(pts[0].v)); for (const p of pts) ctx.lineTo(x(p.t), y(p.v));
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x(t1), y(end), 3.5, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+      this.font(ctx, 11, 700); ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(U.money(end), pad.l + pw + 6, y(end));
+      canvas._hit = { pts: pts, x: x, y: y };
+      this.bindHover(canvas, tip, (px) => { const hit = canvas._hit; if (!hit) return null; let best = null, bd = Infinity; for (const p of hit.pts) { const d = Math.abs(hit.x(p.t) - px); if (d < bd) { bd = d; best = p; } } return best ? { x: hit.x(best.t), y: hit.y(best.v), text: U.money(best.v) + ' · ' + U.dateShort(best.t) } : null; });
+    },
+    bindHover(canvas, tip, find) {
+      if (!tip) return;
+      if (canvas._bound) { canvas._find = find; return; }
+      canvas._bound = true; canvas._find = find;
+      const show = (ev) => {
+        const r = canvas.getBoundingClientRect();
+        const px = (ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left;
+        const hit = canvas._find ? canvas._find(px) : null;
+        if (!hit) { tip.style.display = 'none'; return; }
+        tip.textContent = hit.text; tip.style.display = 'block';
+        tip.style.left = U.clamp(hit.x, 60, r.width - 60) + 'px'; tip.style.top = Math.max(16, hit.y - 8) + 'px';
+      };
+      canvas.addEventListener('mousemove', show); canvas.addEventListener('touchstart', show, { passive: true }); canvas.addEventListener('touchmove', show, { passive: true });
+      canvas.addEventListener('mouseleave', () => { tip.style.display = 'none'; }); canvas.addEventListener('touchend', () => { tip.style.display = 'none'; });
+    }
+  };
+  function hexA(hex, a) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) return hex;
+    const n = parseInt(m[1], 16);
+    return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+
+  /* ---------- scanner ---------- */
+  const Scanner = {
+    run() {
+      const t = Date.now();
+      S.scanner.ops = A.scan(S.universe, S.settings, S.seriesCache, t);
+      S.scanner.at = t;
+      if (window.UI) UI.onScanner();
+    },
+    counts() { const c = { all: S.scanner.ops.length }; for (const o of S.scanner.ops) c[o.kind] = (c[o.kind] || 0) + 1; return c; }
+  };
+
+  Object.assign(window, { EDApp: { S: S, Persist: Persist, API: API, DS: DS, Engine: Engine, Desk: Desk, Chart: Chart, Scanner: Scanner, label: label, DEFAULTS: DEFAULTS, newDesk: newDesk, setHealth: setHealth, noteError: noteError } });
+})();
+</script>
+<script>
+/* Edge Desk app, part 2: views, market sheet, paper tickets, AI reads, setup, routing, boot. */
+(function () {
+  'use strict';
+  const { U, N, F, A } = window.ED;
+  const { S, Persist, API, DS, Engine, Desk, Chart, Scanner, label, DEFAULTS, setHealth, noteError } = window.EDApp;
+  const $ = (id) => document.getElementById(id);
+  const esc = U.esc;
+  const cssEsc = (s) => (window.CSS && typeof window.CSS.escape === 'function') ? window.CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&');
+  const KINDS = { arb: 'Book arbitrage', yield: 'Near-certain yield', spread: 'Wide spread', mover: 'Mover', volume: 'Volume surge', longshot: 'Longshot zone' };
+  const VIEWS = ['scanner', 'markets', 'tape', 'desk', 'setup'];
+
+  const UI = window.UI = {
+    mk: { search: '', sort: 'vol24', cat: 'all', watchOnly: false, limit: 80 },
+    tp: { filter: '', min: 0 },
+    /* ----- status ----- */
+    renderStatus() {
+      const h = S.health;
+      const dot = $('st-dot'), txt = $('st-text'), src = $('st-source'), ex = $('st-exchange');
+      if (!dot) return;
+      dot.className = 'dot ' + (h.status === 'live' ? 'live' : h.status === 'stale' ? 'stale' : h.status === 'sim' ? 'sim' : h.status === 'off' ? 'off' : '');
+      txt.textContent = h.text || '';
+      src.textContent = S.source === 'relay' ? ((S.sameOrigin ? 'Live relay' : 'Relay') + (S.settings.env === 'demo' ? ' · demo' : '')) : S.source === 'direct' ? 'Direct' : S.source === 'sim' ? 'Simulated data' : 'No source';
+      src.className = 'chip' + (S.source === 'sim' ? ' warn' : '');
+      const e = h.exchange;
+      ex.textContent = e ? (e.trading_active ? 'Exchange open' : (e.exchange_active ? 'Trading paused' : 'Exchange closed')) : '';
+      this.tickClock();
+    },
+    tickClock() {
+      const el = $('st-updated'); if (!el) return;
+      const now = Date.now();
+      if (S.mode === 'live') {
+        el.textContent = S.health.lastOk ? 'updated ' + U.ago(S.health.lastOk, now) + ' ago' : '';
+        const maxAge = Math.max(S.settings.pollTape, S.settings.pollMarkets) * 3000;
+        if (S.health.lastOk && now - S.health.lastOk > maxAge && S.health.status === 'live') { S.health.status = 'stale'; S.health.text = 'Stale'; this.renderStatus(); }
+        else if (S.health.status === 'stale' && S.health.lastOk && now - S.health.lastOk < maxAge) { S.health.status = 'live'; S.health.text = 'Live'; this.renderStatus(); }
+      } else if (S.mode === 'sim') el.textContent = '';
+      const cd = $('sh-countdown'); if (cd && S.sel) { const m = S.universe.markets.get(S.sel); if (m) cd.textContent = 'closes in ' + U.countdown(m.close, now); }
+    },
+    toast(msg) {
+      const box = $('toasts'); if (!box) return;
+      const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; box.appendChild(t);
+      setTimeout(() => { t.remove(); }, 3200);
+    },
+    /* ----- routing ----- */
+    nav(view, push) {
+      if (!VIEWS.includes(view)) view = 'scanner';
+      S.view = view;
+      for (const v of VIEWS) { const el = $('view-' + v); if (el) el.hidden = v !== view; }
+      document.querySelectorAll('#nav button[data-nav]').forEach(b => b.classList.toggle('on', b.dataset.nav === view));
+      $('main').scrollTop = 0;
+      if (push !== false) { try { if (location.hash !== '#' + view) history.replaceState(null, '', '#' + view); } catch (e) { /* ignore */ } }
+      this.render(view);
+      if (window.innerWidth < 980 && S.sel) this.closeSheet(false);
+    },
+    render(view) {
+      view = view || S.view;
+      if (view === 'scanner') this.renderScanner();
+      else if (view === 'markets') this.renderMarkets();
+      else if (view === 'tape') this.renderTape();
+      else if (view === 'desk') this.renderDesk();
+      else if (view === 'setup') this.renderSetup();
+    },
+    onUniverse() { if (S.view === 'markets' || S.view === 'scanner') this.render(); $('markets-sub').textContent = S.universe.markets.size.toLocaleString() + ' open markets · ' + S.universe.events.size.toLocaleString() + ' events'; if (S.sel) this.renderSheet(); },
+    onScanner() { if (S.view === 'scanner') this.renderScanner(); },
+    onDesk() { if (S.view === 'desk') this.renderDesk(); },
+    onPrices(changed) {
+      const flash = new Map(changed.map(c => [c.ticker, c.dir]));
+      if (S.view === 'markets') {
+        for (const [t, dir] of flash) { const row = document.querySelector('.mrow[data-t="' + cssEsc(t) + '"]'); if (row) { const m = S.universe.markets.get(t); if (m) row.outerHTML = this.marketRow(m); const nrow = document.querySelector('.mrow[data-t="' + cssEsc(t) + '"]'); if (nrow && dir) { nrow.classList.add(dir > 0 ? 'flash-up' : 'flash-down'); } } }
+      }
+      if (S.sel && flash.has(S.sel)) this.renderSheetQuote(flash.get(S.sel));
+      if (S.view === 'desk') this.renderDesk();
+    },
+    onTape(fresh) {
+      if (S.view !== 'tape') return;
+      if (!fresh.length) { if (S.blocked.trades) this.renderTape(); return; }
+      this.renderTapeStats();
+      const list = $('tape-list');
+      const rows = fresh.filter(t => this.tapeMatch(t)).map(t => this.tapeRow(t, true)).join('');
+      if (rows) { list.insertAdjacentHTML('afterbegin', rows); while (list.children.length > 160) list.lastElementChild.remove(); }
+    },
+
+    /* ----- scanner ----- */
+    renderScanner() {
+      const ops = S.scanner.ops, counts = Scanner.counts();
+      const banner = $('scanner-banner');
+      banner.innerHTML = this.sourceBanner();
+      const kinds = ['all', 'arb', 'yield', 'spread', 'mover', 'volume', 'longshot'];
+      $('scanner-chips').innerHTML = kinds.map(k => '<button class="chip' + (S.scanner.kind === k ? ' on' : '') + '" data-act="skind" data-k="' + k + '">' + (k === 'all' ? 'All' : KINDS[k]) + ' <b>' + (counts[k] || 0) + '</b></button>').join('');
+      const sub = $('scanner-sub');
+      sub.textContent = S.universe.markets.size ? (S.universe.markets.size.toLocaleString() + ' open markets scanned ' + (S.scanner.at ? U.ago(S.scanner.at) + ' ago' : '')) : 'Loading the market universe';
+      let shown;
+      if (S.scanner.kind === 'all') {
+        const per = {}; shown = [];
+        for (const o of ops) { per[o.kind] = (per[o.kind] || 0) + 1; if (per[o.kind] <= 6) shown.push(o); }
+      } else shown = ops.filter(o => o.kind === S.scanner.kind);
+      const list = $('scanner-list');
+      if (!shown.length) { list.innerHTML = '<div class="empty">' + (S.universe.markets.size ? 'No ' + (S.scanner.kind === 'all' ? 'signals' : KINDS[S.scanner.kind].toLowerCase() + ' signals') + ' in the loaded universe right now. Load more pages in Setup to widen the scan.' : 'Markets are loading. Signals appear here as soon as the first page arrives.') + '</div>'; }
+      else list.innerHTML = shown.map(o => this.oppCard(o)).join('');
+      this.renderBrief();
+    },
+    sourceBanner() {
+      if (S.mode === 'sim') {
+        const why = S.ctx === 'artifact'
+          ? 'This copy runs inside Claude, which keeps pages from calling outside APIs, so the markets below are generated for demonstration. The live version is the same app served from your own free Cloudflare Worker; Setup has the two-minute recipe.'
+          : esc(S.health.simReason || '') + '. Kalshi\'s API refuses browser requests, so the live version runs through a small relay you deploy once (free). Everything below is generated for demonstration.';
+        return '<div class="banner warn"><div><p><b>Simulated data.</b> ' + why + '</p><div class="actions"><button class="btn sm primary" data-act="nav" data-v="setup">Go live</button></div></div></div>';
+      }
+      if (S.health.status === 'stale') return '<div class="banner danger"><div><p><b>Data is stale.</b> ' + esc(S.health.lastErr || 'The relay stopped answering') + '. Polling continues; prices shown may be old.</p></div></div>';
+      if (S.mode === 'live' && S.universe.loading) return '<div class="banner"><div><p><b>Loading the market universe</b> · ' + S.universe.markets.size.toLocaleString() + ' markets so far. Signals refine as more pages arrive.</p></div></div>';
+      return '';
+    },
+    oppCard(o, idx) {
+      const ev = S.universe.events.get(o.event);
+      const cat = ev && ev.category ? ev.category : '';
+      let legs = '';
+      if (o.kind === 'arb') {
+        legs = '<div class="legs">' + o.tickers.map(t => { const m = S.universe.markets.get(t); if (!m) return ''; const px = o.sub === 'no' ? 'NO ' + U.cents(1 - m.yb) + ' <span class="faint">(' + U.compact(m.ybSize) + ')</span>' : 'YES ' + U.cents(m.ya) + ' <span class="faint">(' + U.compact(m.yaSize) + ')</span>'; return '<div><span class="truncate" style="max-width:70%"><a href="#" data-act="open" data-t="' + esc(t) + '">' + esc(m.yesSub || m.title) + '</a></span><span class="' + (o.sub === 'no' ? 'no' : 'yes') + '">' + px + '</span></div>'; }).join('') + '</div>';
+      }
+      const t0 = o.tickers[0];
+      const m0 = S.universe.markets.get(t0);
+      const watchOn = S.watch.has(t0);
+      let actions = '<button class="btn sm" data-act="open" data-t="' + esc(t0) + '">' + (o.kind === 'arb' ? 'Open legs' : 'Open') + '</button>';
+      if (o.kind === 'arb') { const sets = Math.max(1, Math.min(10, Math.floor(o.size || 1))); actions += '<button class="btn sm primary" data-act="paperset" data-i="' + S.scanner.ops.indexOf(o) + '" data-n="' + sets + '">Paper ' + sets + ' set' + (sets > 1 ? 's' : '') + '</button>'; }
+      else if (o.kind === 'yield') actions += '<button class="btn sm ' + o.side + '" data-act="ticket" data-t="' + esc(t0) + '" data-side="' + o.side + '">Paper ' + o.side.toUpperCase() + ' at ' + U.cents(o.price) + '</button>';
+      else if (o.kind === 'longshot') actions += '<button class="btn sm no" data-act="ticket" data-t="' + esc(t0) + '" data-side="no">Paper NO at ' + U.cents(o.noPrice) + '</button>';
+      else if (o.kind === 'spread') actions += '<button class="btn sm" data-act="ticket" data-t="' + esc(t0) + '" data-side="yes" data-type="limit" data-price="' + (o.yb + 0.01).toFixed(2) + '">Rest a bid at ' + U.cents(o.yb + 0.01) + '</button>';
+      if (o.kind !== 'arb') actions += '<button class="btn sm ghost" data-act="watch" data-t="' + esc(t0) + '">' + (watchOn ? 'Unwatch' : 'Watch') + '</button>';
+      if (m0) actions += '<a class="btn sm ghost" href="' + this.kalshiUrl(m0) + '" target="_blank" rel="noopener">Kalshi</a>';
+      const brief = S.scanner.brief && S.scanner.brief.items ? S.scanner.brief.items.find(b => b.key === this.opKey(o)) : null;
+      const briefHtml = brief ? '<div class="small" style="padding:8px 10px;background:var(--bg-sunk);border-radius:var(--radius)"><b>Claude:</b> ' + esc(brief.take) + (brief.caution ? ' <span class="muted">' + esc(brief.caution) + '</span>' : '') + ' <span class="faint">(' + esc(brief.confidence || '') + ' confidence)</span></div>' : '';
+      return '<div class="card opp" data-op="' + esc(this.opKey(o)) + '">' +
+        '<div class="opp-head"><span class="kind ' + o.kind + '">' + KINDS[o.kind] + '</span>' + (cat ? '<span class="faint small">' + esc(cat) + '</span>' : '') + (m0 && m0.close ? '<span class="faint small" style="margin-left:auto">closes ' + U.countdown(m0.close) + '</span>' : '') + '</div>' +
+        '<div class="title">' + esc(o.title) + '</div>' +
+        '<div class="headline">' + esc(o.headline) + '</div>' +
+        '<div class="math">' + esc(o.math) + '</div>' + legs +
+        '<div class="note">' + esc(o.note) + '</div>' + briefHtml +
+        '<div class="actions">' + actions + '</div></div>';
+    },
+    opKey(o) { return o.kind + ':' + (o.sub || '') + ':' + o.tickers.join(','); },
+    kalshiUrl(m) { return 'https://kalshi.com/markets/' + encodeURIComponent(String(m.series || '').toLowerCase()); },
+    briefOps() { return S.scanner.kind === 'all' ? S.scanner.ops.slice(0, 14) : S.scanner.ops.filter(o => o.kind === S.scanner.kind).slice(0, 14); },
+    renderBrief() {
+      const box = $('scanner-brief'); if (!box) return;
+      if (!S.ai) { box.innerHTML = S.scanner.ops.length ? '<div class="row" style="margin:6px 0 4px"><button class="btn sm" data-act="copybrief">Copy a prompt for Claude</button><span class="faint small">Paste it into a Claude chat for a second opinion on these signals.</span></div>' : ''; return; }
+      const b = S.scanner.brief;
+      if (S.scanner.briefBusy) { box.innerHTML = '<div class="banner"><div><p class="think">Claude is reading the scan…</p><div class="actions"><button class="btn sm" data-act="briefstop">Stop</button></div></div></div>'; return; }
+      if (b && b.summary) { box.innerHTML = '<div class="banner"><div><p><b>Claude\'s desk brief</b> · ' + esc(U.dateShort(b.at)) + '</p><p style="margin-top:6px">' + esc(b.summary) + '</p><p class="faint small" style="margin-top:6px">Reasoning from the numbers shown and general knowledge; no live news. Not advice.</p><div class="actions"><button class="btn sm" data-act="brief">Refresh brief</button></div></div></div>'; return; }
+      box.innerHTML = '<div class="row" style="margin:6px 0 4px"><button class="btn sm" data-act="brief">Ask Claude to rank these signals</button><span class="faint small">Uses your Claude account; you confirm the first time.</span></div>';
+    },
+
+    /* ----- markets ----- */
+    marketRow(m) {
+      const ev = S.universe.events.get(m.event);
+      const d = (m.last !== null && m.prev !== null) ? m.last - m.prev : null;
+      const price = m.mid !== null ? m.mid : m.last;
+      return '<div class="mrow" data-act="open" data-t="' + esc(m.ticker) + '">' +
+        '<div class="grow"><div class="t">' + esc(label(m)) + (S.watch.has(m.ticker) ? ' <span class="faint">★</span>' : '') + '</div>' +
+        '<div class="meta">' + (ev && ev.category ? '<span>' + esc(ev.category) + '</span>' : '') + '<span>' + U.countdown(m.close) + '</span><span>24h ' + U.compact(m.vol24) + '</span><span class="mono">' + esc(m.ticker) + '</span></div></div>' +
+        '<div class="px"><div class="p">' + U.cents(price) + '</div><div class="d ' + (d === null ? 'faint' : d > 0 ? 'up' : d < 0 ? 'down' : 'faint') + '">' + (d === null ? '—' : (d > 0 ? '▲' : d < 0 ? '▼' : '') + ' ' + U.cents(Math.abs(d))) + '</div></div>' +
+        '<div class="sides"><button class="pxbtn yes" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="yes">YES ' + (m.hasAsk ? U.cents(m.ya) : '—') + '</button><button class="pxbtn no" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="no">NO ' + (m.hasBid ? U.cents(1 - m.yb) : '—') + '</button></div></div>';
+    },
+    marketsFiltered() {
+      const q = this.mk.search.trim().toLowerCase();
+      const cat = this.mk.cat;
+      let arr = Array.from(S.universe.markets.values()).filter(m => m.status === 'active');
+      if (this.mk.watchOnly) arr = arr.filter(m => S.watch.has(m.ticker));
+      if (cat !== 'all') arr = arr.filter(m => { const ev = S.universe.events.get(m.event); return (ev && ev.category) === cat; });
+      if (q) arr = arr.filter(m => (m.ticker + ' ' + label(m) + ' ' + m.event).toLowerCase().includes(q));
+      const sort = this.mk.sort;
+      const key = (m) => sort === 'vol' ? m.vol : sort === 'oi' ? m.oi : sort === 'close' ? -(m.close || Infinity) : sort === 'move' ? (m.last !== null && m.prev !== null ? Math.abs(m.last - m.prev) : -1) : sort === 'spread' ? (m.hasBid && m.hasAsk ? m.ya - m.yb : -1) : m.vol24;
+      arr.sort((a, b) => key(b) - key(a));
+      return arr;
+    },
+    renderMarkets() {
+      const cats = new Map();
+      for (const ev of S.universe.events.values()) { if (!ev.category) continue; cats.set(ev.category, (cats.get(ev.category) || 0) + ev.markets.length); }
+      const catList = Array.from(cats.entries()).sort((a, b) => b[1] - a[1]);
+      $('mk-cats').innerHTML = '<button class="chip' + (this.mk.cat === 'all' ? ' on' : '') + '" data-act="mcat" data-c="all">All</button>' + catList.map(([c, n]) => '<button class="chip' + (this.mk.cat === c ? ' on' : '') + '" data-act="mcat" data-c="' + esc(c) + '">' + esc(c) + ' <b>' + n + '</b></button>').join('');
+      const arr = this.marketsFiltered();
+      const list = $('mk-list');
+      const q = this.mk.search.trim();
+      const looksLikeTicker = /^[A-Za-z]{2,}[A-Za-z0-9-]*\d[A-Za-z0-9-]*$/.test(q) && q.length >= 6;
+      if (!arr.length) list.innerHTML = '<div class="empty" style="margin-top:10px">' + (S.universe.markets.size ? 'Nothing matches in the loaded universe.' + (looksLikeTicker && S.mode === 'live' ? ' <button class="btn sm" style="margin-left:6px" data-act="open" data-t="' + esc(q.toUpperCase()) + '">Look up ' + esc(q.toUpperCase()) + ' on Kalshi</button>' : ' Clear the search or pick another category.') : 'Markets are loading.') + '</div>';
+      else list.innerHTML = arr.slice(0, this.mk.limit).map(m => this.marketRow(m)).join('');
+      $('mk-more').innerHTML = arr.length > this.mk.limit ? '<button class="btn block" data-act="mmore">Show more (' + (arr.length - this.mk.limit).toLocaleString() + ' remaining)</button>' : '';
+      $('markets-sub').textContent = S.universe.markets.size.toLocaleString() + ' open markets · ' + S.universe.events.size.toLocaleString() + ' events' + (S.mode === 'live' && S.universe.pages ? (S.universe.loading ? ' · loading page ' + (S.universe.pages + 1) : S.universe.complete ? ' · complete' : ' · first ' + S.universe.pages + ' pages; raise Universe pages in Setup for more') : '');
+    },
+
+    /* ----- tape ----- */
+    tapeMatch(t) {
+      if (t.qty < this.tp.min) return false;
+      const q = this.tp.filter.trim().toLowerCase();
+      if (!q) return true;
+      const m = S.universe.markets.get(t.ticker);
+      return (t.ticker + ' ' + (m ? label(m) : '')).toLowerCase().includes(q);
+    },
+    tapeRow(t, isNew) {
+      const m = S.universe.markets.get(t.ticker);
+      const big = t.qty >= S.settings.bigPrint;
+      const side = t.taker === 'no' ? 'no' : 'yes';
+      const px = side === 'no' ? t.no : t.yes;
+      return '<div class="trow' + (big ? ' big' : '') + (isNew ? ' new' : '') + '" data-act="open" data-t="' + esc(t.ticker) + '">' +
+        '<div class="time">' + U.timeOnly(t.t) + '</div>' +
+        '<div class="tk"><div class="n">' + esc(m ? label(m) : t.ticker) + '</div><div class="k">' + esc(t.ticker) + (t.block ? ' · block' : '') + '</div></div>' +
+        '<div class="side ' + side + '">' + side.toUpperCase() + ' ' + U.cents(px) + '</div>' +
+        '<div class="qty">' + U.compact(t.qty) + '</div></div>';
+    },
+    renderTapeStats() {
+      const st = A.tapeStats(S.tape.trades, 600000);
+      const tot = st.yesQty + st.noQty;
+      const yesPct = tot ? st.yesQty / tot : 0.5;
+      $('tape-stats').innerHTML =
+        '<div class="stat"><div class="label">Prints · 10 min</div><div class="v">' + st.n + '</div><div class="s">' + st.perMin.toFixed(1) + ' per minute</div></div>' +
+        '<div class="stat"><div class="label">Taker flow</div><div class="v"><span class="yes">' + U.pct(yesPct, 0) + ' YES</span></div><div class="flow"><i style="width:' + (yesPct * 100).toFixed(1) + '%"></i></div><div class="s">' + U.compact(st.yesQty) + ' vs ' + U.compact(st.noQty) + ' contracts</div></div>' +
+        '<div class="stat"><div class="label">Notional</div><div class="v">' + U.money(st.notional, { dec: 0 }) + '</div><div class="s">' + st.big + ' big print' + (st.big === 1 ? '' : 's') + ' (500+)</div></div>' +
+        '<div class="stat"><div class="label">Most active</div><div class="s" style="margin-top:4px">' + (st.top.slice(0, 4).map(x => '<a href="#" data-act="open" data-t="' + esc(x.ticker) + '" class="mono">' + esc(x.ticker.length > 22 ? x.ticker.slice(0, 22) + '…' : x.ticker) + '</a> <span class="faint">' + U.compact(x.qty) + '</span>').join('<br>') || '—') + '</div></div>';
+    },
+    renderTape() {
+      this.renderTapeStats();
+      const rows = S.tape.trades.filter(t => this.tapeMatch(t)).slice(0, 150);
+      $('tape-list').innerHTML = rows.length ? rows.map(t => this.tapeRow(t, false)).join('') : '<div class="empty">' + (S.blocked.trades ? 'Kalshi\'s trade feed asked for authentication, so the public tape is unavailable on this exchange.' : 'Waiting for prints. The tape fills as trades happen on the exchange.') + '</div>';
+    },
+
+    /* ----- desk ----- */
+    renderDesk() {
+      const d = S.desk; const v = Desk.value();
+      const openPnl = v.positions - Object.values(d.positions).reduce((s, p) => s + p.cost, 0);
+      const ret = d.start ? (v.equity - d.start) / d.start : 0;
+      $('desk-tiles').innerHTML =
+        '<div class="tile"><div class="label">Equity</div><div class="v">' + U.money(v.equity) + '</div><div class="s ' + (ret >= 0 ? 'up' : 'down') + '">' + U.signed(ret * 100, 2) + '% since start</div></div>' +
+        '<div class="tile"><div class="label">Cash</div><div class="v">' + U.money(d.cash) + '</div><div class="s">' + U.money(v.positions) + ' in positions</div></div>' +
+        '<div class="tile"><div class="label">Open P&amp;L</div><div class="v ' + (openPnl >= 0 ? 'up' : 'down') + '">' + U.money(openPnl, { plus: true }) + '</div><div class="s">marked at the bid</div></div>' +
+        '<div class="tile"><div class="label">Realized</div><div class="v ' + (d.realized >= 0 ? 'up' : 'down') + '">' + U.money(d.realized, { plus: true }) + '</div><div class="s">' + U.money(d.fees) + ' paid in fees</div></div>';
+      Chart.spark($('desk-equity'), $('desk-equity-tip'), d.equity);
+      const keys = Object.keys(d.positions);
+      $('desk-positions').innerHTML = keys.length ? '<div class="tablewrap"><table class="table"><thead><tr><th>Market</th><th class="r">Qty</th><th class="r">Avg cost</th><th class="r">Bid</th><th class="r">P&amp;L</th><th></th></tr></thead><tbody>' + keys.map(k => {
+        const p = d.positions[k]; const m = S.universe.markets.get(p.ticker); const bid = m ? Desk.quote(m, p.side, 'sell') : null;
+        const val = p.qty * (bid !== null ? bid : p.cost / p.qty); const pnl = val - p.cost;
+        return '<tr><td><a href="#" data-act="open" data-t="' + esc(p.ticker) + '">' + esc(p.title) + '</a><div class="faint small"><span class="' + p.side + '">' + p.side.toUpperCase() + '</span> · <span class="mono">' + esc(p.ticker) + '</span>' + (m && m.close ? ' · closes ' + U.countdown(m.close) : '') + '</div></td><td class="r">' + p.qty + '</td><td class="r">' + U.cents(p.cost / p.qty) + '</td><td class="r">' + U.cents(bid) + '</td><td class="r ' + (pnl >= 0 ? 'up' : 'down') + '">' + U.money(pnl, { plus: true }) + '</td><td class="r"><button class="btn sm" data-act="sell" data-k="' + esc(k) + '">Close</button></td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">No open positions. Use the YES / NO buttons on any market, or the Paper buttons in the Scanner.</div>';
+      $('desk-orders').innerHTML = d.orders.length ? '<div class="tablewrap"><table class="table"><thead><tr><th>Market</th><th class="r">Side</th><th class="r">Qty</th><th class="r">Limit</th><th class="r">Now</th><th></th></tr></thead><tbody>' + d.orders.map(o => {
+        const m = S.universe.markets.get(o.ticker); const ask = m ? Desk.quote(m, o.side, 'buy') : null;
+        return '<tr><td><a href="#" data-act="open" data-t="' + esc(o.ticker) + '">' + esc(o.title) + '</a><div class="faint small mono">' + esc(o.ticker) + '</div></td><td class="r ' + o.side + '">' + o.side.toUpperCase() + '</td><td class="r">' + o.qty + '</td><td class="r">' + U.cents(o.price) + '</td><td class="r">' + U.cents(ask) + '</td><td class="r"><button class="btn sm ghost" data-act="cancel" data-id="' + esc(o.id) + '">Cancel</button></td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">No resting orders. Limit orders rest here and fill when the market trades through your price.</div>';
+      $('desk-fills').innerHTML = d.fills.length ? '<div class="tablewrap"><table class="table"><thead><tr><th>When</th><th>Market</th><th class="r">Action</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Fee</th><th class="r">P&amp;L</th></tr></thead><tbody>' + d.fills.slice(0, 60).map(f =>
+        '<tr><td class="faint">' + U.dateShort(f.t) + '</td><td><a href="#" data-act="open" data-t="' + esc(f.ticker) + '">' + esc(f.title) + '</a></td><td class="r"><span class="' + f.side + '">' + f.side.toUpperCase() + '</span> ' + f.action + (f.maker ? ' (maker)' : '') + '</td><td class="r">' + f.qty + '</td><td class="r">' + U.cents(f.price) + '</td><td class="r">' + (f.fee ? U.money(f.fee) : '—') + '</td><td class="r ' + (f.pnl === undefined ? '' : f.pnl >= 0 ? 'up' : 'down') + '">' + (f.pnl === undefined ? '—' : U.money(f.pnl, { plus: true })) + '</td></tr>').join('') + '</tbody></table></div>' : '<div class="empty">No fills yet.</div>';
+      $('desk-account').innerHTML = '<label class="field" style="flex:1 1 160px"><span>Starting bankroll</span><input class="inp" id="desk-bankroll" type="number" min="10" step="10" value="' + esc(d.start) + '"></label>' +
+        '<button class="btn" data-act="reset1">Reset paper account</button><span id="desk-reset-confirm"></span>' +
+        '<button class="btn ghost" data-act="export">Export</button>' +
+        '<div id="desk-export" style="flex-basis:100%"></div>';
+    },
+
+    /* ----- market sheet ----- */
+    openSheet() {
+      const sheet = $('sheet'); sheet.hidden = false; document.body.classList.add('sheet-open');
+      this.renderSheet();
+      $('sh-body').scrollTop = 0;
+    },
+    closeSheet(keep) {
+      $('sheet').hidden = true; document.body.classList.remove('sheet-open');
+      if (!keep) S.sel = null;
+    },
+    renderSheet() {
+      const m = S.universe.markets.get(S.sel); if (!m) return;
+      const ev = S.universe.events.get(m.event);
+      $('sh-event').textContent = (ev && ev.category ? ev.category + ' · ' : '') + (ev ? ev.title : m.event);
+      $('sh-title').textContent = m.title && !m.yesSub ? m.title : (m.yesSub || m.title || m.ticker);
+      $('sh-meta').innerHTML = '<span class="mono">' + esc(m.ticker) + '</span><button class="btn sm ghost" data-act="copy" data-text="' + esc(m.ticker) + '">Copy</button><span id="sh-countdown">closes in ' + U.countdown(m.close) + '</span>' + (m.provisional ? '<span class="chip warn">provisional</span>' : '') + (m.status !== 'active' ? '<span class="chip">' + esc(m.status) + '</span>' : '');
+      const fee = Desk.feeInfo(m);
+      const feeTxt = fee.waived ? 'Fees waived until ' + U.dateShort(m.feeWaiverUntil) : (fee.type === 'quadratic_with_maker_fees' ? 'Taker ' + (F.rate('taker', fee) * 100).toFixed(1) + '% · maker ' + (F.rate('maker', fee) * 100).toFixed(2) + '%' : fee.type === 'quadratic_with_combo_maker_fees' ? 'Combo: maker pays half the taker fee' : fee.type === 'flat' ? 'Flat fee series' : 'Taker ' + (F.rate('taker', fee) * 100).toFixed(1) + '% · no maker fee') + (S.seriesCache[m.series] && S.seriesCache[m.series].unknown ? ' (series lookup failed; default schedule shown)' : '');
+      const siblings = ev && ev.mutEx && ev.markets.length > 1 ? ev.markets.map(t => S.universe.markets.get(t)).filter(Boolean) : [];
+      let bookHtml = '';
+      if (siblings.length) {
+        const sumAsk = siblings.reduce((s, x) => s + (x.hasAsk ? x.ya : 1), 0), sumBid = siblings.reduce((s, x) => s + (x.hasBid ? x.yb : 0), 0);
+        bookHtml = '<div class="section" style="margin-top:0"><h3>One-winner book · ' + siblings.length + ' outcomes</h3><div class="legs small" style="display:grid;gap:3px">' + siblings.map(x => '<div style="display:flex;justify-content:space-between;gap:8px"><a href="#" data-act="open" data-t="' + esc(x.ticker) + '" class="truncate" style="max-width:62%">' + (x.ticker === m.ticker ? '<b>' : '') + esc(x.yesSub || x.title) + (x.ticker === m.ticker ? '</b>' : '') + '</a><span><span class="yes">' + (x.hasBid ? U.cents(x.yb) : '—') + '</span> / <span class="no">' + (x.hasAsk ? U.cents(x.ya) : '—') + '</span></span></div>').join('') +
+          '</div><div class="small muted" style="margin-top:6px">YES asks sum to <b>' + U.cents(sumAsk) + '</b> · YES bids sum to <b>' + U.cents(sumBid) + '</b>. Below 100¢ on asks (minus fees) means buying every YES locks a profit if one must win; above 100¢ on bids means selling every YES locks one.</div></div>';
+      }
+      $('sh-body').innerHTML =
+        '<div id="sh-quote"></div>' +
+        '<div class="facts" id="sh-facts"></div>' +
+        '<div><div class="row" style="justify-content:space-between;margin-bottom:6px"><span class="label">Price history</span><div class="seg">' + ['1D', '1W', '1M', 'All'].map(r => '<button data-act="range" data-r="' + r + '"' + (S.sheet.range === r ? ' class="on"' : '') + '>' + r + '</button>').join('') + '</div></div><div class="chart-wrap"><canvas id="sh-chart" height="190"></canvas><div class="chart-tip" id="sh-chart-tip"></div></div><div class="faint small" id="sh-chart-note" style="margin-top:4px"></div></div>' +
+        '<div><div class="label" style="margin-bottom:6px">Order book</div>' + (S.blocked.book ? '<div class="empty">Kalshi\'s order book endpoint asked for authentication, so depth is hidden. Top-of-book bid, ask and size still update from the market record.</div>' : '<div class="chart-wrap"><canvas id="sh-depth" height="120"></canvas><div class="chart-tip" id="sh-depth-tip"></div></div><div class="ladder" id="sh-ladder" style="margin-top:8px"></div>') + '</div>' +
+        '<div class="section" style="margin-top:0"><h3>Edge calculator</h3><div class="calc" id="sh-calc"></div></div>' +
+        '<div class="section" style="margin-top:0"><h3>Paper ticket</h3><div class="ticket" id="sh-ticket"></div></div>' +
+        '<div class="section" style="margin-top:0"><h3>Claude\'s read</h3><div class="ai" id="sh-ai"></div></div>' +
+        '<div class="section" style="margin-top:0"><h3>Recent trades</h3><div id="sh-trades"></div></div>' +
+        bookHtml +
+        '<div class="section" style="margin-top:0"><h3>Rules</h3><details class="rules"' + (m.rules && m.rules.length < 400 ? ' open' : '') + '><summary>' + (m.rules ? 'Settlement rules' : 'Rules load when the full market record arrives') + '</summary><p>' + esc(m.rules || '') + (m.rules2 ? '\n\n' + esc(m.rules2) : '') + '</p></details></div>' +
+        '<div class="row"><a class="btn" href="' + this.kalshiUrl(m) + '" target="_blank" rel="noopener">Open on Kalshi</a><button class="btn ghost" data-act="watch" data-t="' + esc(m.ticker) + '">' + (S.watch.has(m.ticker) ? 'Unwatch' : 'Watch') + '</button><span class="faint small">' + esc(feeTxt) + '</span></div>';
+      this.renderSheetQuote(0);
+      this.renderCalc();
+      this.renderTicket();
+      this.renderAI();
+      this.renderSheetLive();
+      this.renderChart();
+    },
+    renderSheetQuote(dir) {
+      const m = S.universe.markets.get(S.sel); if (!m || !$('sh-quote')) return;
+      const d = (m.last !== null && m.prev !== null) ? m.last - m.prev : null;
+      $('sh-quote').innerHTML = '<div class="quote">' +
+        '<div class="qbox yes' + (dir > 0 ? ' flash-up' : '') + '"><div class="l">Yes</div><div class="p">' + (m.hasAsk ? U.cents(m.ya) : '—') + '</div><div class="s">bid ' + (m.hasBid ? U.cents(m.yb) : '—') + ' · ' + U.compact(m.yaSize) + ' offered</div><button class="btn sm yes" style="margin-top:8px" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="yes">Buy YES</button></div>' +
+        '<div class="qbox no' + (dir < 0 ? ' flash-down' : '') + '"><div class="l">No</div><div class="p">' + (m.hasBid ? U.cents(1 - m.yb) : '—') + '</div><div class="s">bid ' + (m.hasAsk ? U.cents(1 - m.ya) : '—') + ' · ' + U.compact(m.ybSize) + ' offered</div><button class="btn sm no" style="margin-top:8px" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="no">Buy NO</button></div></div>';
+      const f = (k, v, cls) => '<div><div class="k">' + k + '</div><div class="v' + (cls ? ' ' + cls : '') + '">' + v + '</div></div>';
+      $('sh-facts').innerHTML = f('Last', U.cents(m.last)) + f('24h change', d === null ? '—' : (d > 0 ? '▲ ' : d < 0 ? '▼ ' : '') + U.cents(Math.abs(d)), d === null ? '' : d > 0 ? 'up' : d < 0 ? 'down' : '') + f('Spread', m.hasBid && m.hasAsk ? U.cents(m.ya - m.yb) : '—') + f('Volume', U.compact(m.vol)) + f('24h volume', U.compact(m.vol24)) + f('Open interest', U.compact(m.oi)) + f('Closes', U.dateShort(m.close)) + f('Expires', U.dateShort(m.exp));
+      const ticketPv = $('sh-ticket'); if (ticketPv) this.renderTicketPreview();
+      const calc = $('sh-calc'); if (calc && S.sheet.calcQ === null) this.renderCalc();
+      else if (calc) this.renderCalcOut();
+    },
+    renderSheetLive() {
+      const m = S.universe.markets.get(S.sel); if (!m) return;
+      const book = S.sheet.book;
+      const depth = $('sh-depth'); if (depth) Chart.depth(depth, $('sh-depth-tip'), book);
+      const ladder = $('sh-ladder');
+      if (ladder) {
+        if (!book) ladder.innerHTML = '<div class="faint small">Loading book…</div>';
+        else {
+          const maxQ = Math.max(1, ...book.yesBids.slice(0, 8).map(x => x[1]), ...book.yesAsks.slice(0, 8).map(x => x[1]));
+          const col = (title, cls, rows) => '<div class="col ' + cls + '"><h4>' + title + '</h4>' + (rows.length ? rows.map(([p, q]) => '<div class="lrow"><i class="bar" style="width:' + Math.min(100, q / maxQ * 100).toFixed(0) + '%"></i><span>' + U.cents(p) + '</span><span class="q">' + U.compact(q) + '</span></div>').join('') : '<div class="faint">none</div>') + '</div>';
+          ladder.innerHTML = col('YES bids', 'yes', book.yesBids.slice(0, 8)) + col('YES offers', 'no', book.yesAsks.slice(0, 8));
+        }
+      }
+      const tr = $('sh-trades');
+      if (tr) tr.innerHTML = S.sheet.trades.length ? S.sheet.trades.slice(0, 12).map(t => { const side = t.taker === 'no' ? 'no' : 'yes'; return '<div class="trow" style="grid-template-columns:62px 1fr 72px;cursor:default"><div class="time">' + U.timeOnly(t.t) + '</div><div class="side ' + side + '">' + side.toUpperCase() + ' ' + U.cents(side === 'no' ? t.no : t.yes) + '</div><div class="qty">' + U.compact(t.qty) + '</div></div>'; }).join('') : '<div class="faint small">' + (S.blocked.trades ? 'Trade history needs authentication on this exchange.' : 'No recent prints.') + '</div>';
+      this.renderTicketPreview();
+    },
+    renderChart() {
+      const c = $('sh-chart'); if (c) Chart.price(c, $('sh-chart-tip'), S.sheet.candles);
+      const note = $('sh-chart-note');
+      if (note) note.textContent = S.sheet.candleSource === 'trades' ? 'Built from public trade prints (candles need an API key).' : S.sheet.candleSource === 'none' ? 'No trades in this range yet.' : '';
+    },
+    renderCalc() {
+      const m = S.universe.markets.get(S.sel); const box = $('sh-calc'); if (!m || !box) return;
+      if (S.sheet.calcQ === null) S.sheet.calcQ = m.mid !== null ? Math.round(m.mid * 100) : 50;
+      box.innerHTML = '<div class="slider"><div class="row" style="justify-content:space-between"><span class="small muted">Your probability of YES</span><b id="calc-q-label">' + S.sheet.calcQ + '%</b></div><input type="range" id="calc-q" min="1" max="99" value="' + S.sheet.calcQ + '"></div>' +
+        '<div class="row small muted" style="gap:14px"><label class="row" style="gap:6px">Bankroll <input class="inp" id="calc-bank" type="number" min="1" step="50" value="' + esc(S.settings.bankroll) + '" style="width:96px;padding:4px 6px"></label><label class="row" style="gap:6px">Kelly <select class="sel" id="calc-kelly" style="padding:4px 6px"><option value="1"' + (S.settings.kelly === 1 ? ' selected' : '') + '>Full</option><option value="0.5"' + (S.settings.kelly === 0.5 ? ' selected' : '') + '>Half</option><option value="0.25"' + (S.settings.kelly === 0.25 ? ' selected' : '') + '>Quarter</option><option value="0.1"' + (S.settings.kelly === 0.1 ? ' selected' : '') + '>Tenth</option></select></label></div>' +
+        '<div class="evgrid" id="calc-out"></div>' +
+        '<div class="faint small">EV uses the taker price plus Kalshi\'s fee for one contract. Kelly size assumes your probability is exactly right, which it is not; fractional Kelly is the usual correction.</div>';
+      this.renderCalcOut();
+    },
+    renderCalcOut() {
+      const m = S.universe.markets.get(S.sel); const out = $('calc-out'); if (!m || !out) return;
+      const q = (S.sheet.calcQ === null ? 50 : S.sheet.calcQ) / 100;
+      const info = Desk.feeInfo(m);
+      const lbl = $('calc-q-label'); if (lbl) lbl.textContent = Math.round(q * 100) + '%';
+      const bank = U.num(($('calc-bank') || {}).value, S.settings.bankroll), kf = U.num(($('calc-kelly') || {}).value, S.settings.kelly);
+      const box = (side) => {
+        const price = side === 'yes' ? (m.hasAsk ? m.ya : null) : (m.hasBid ? U.round(1 - m.yb, 4) : null);
+        if (price === null) return '<div class="evbox"><div class="h ' + side + '">' + side.toUpperCase() + '</div><div class="faint">No offer</div></div>';
+        const fee = F.perContract(price, 'taker', info, S.settings.rounding);
+        const e = A.edge(q, side, price, fee);
+        const sz = A.sizeFor(bank, kf, e);
+        const good = e.ev > 0;
+        return '<div class="evbox"><div class="h ' + side + '">Buy ' + side.toUpperCase() + ' at ' + U.cents(price) + '</div>' +
+          '<div class="big ' + (good ? 'up' : 'down') + '">' + (e.ev >= 0 ? '+' : '−') + U.cents(Math.abs(e.ev)) + ' <span class="small" style="font-weight:400">EV / contract</span></div>' +
+          '<div>Return on cost <b class="' + (good ? 'up' : 'down') + '">' + U.signed(e.roi * 100, 1) + '%</b></div>' +
+          '<div>Breakeven belief <b>' + U.pct(e.breakeven, 1) + '</b></div>' +
+          '<div>Fee <b>' + U.cents(fee) + '</b></div>' +
+          (good ? '<div>Kelly ' + U.pct(e.kelly, 1) + ' → <b>' + sz.contracts + ' contracts</b> (' + U.money(sz.stake) + ')</div><button class="btn sm ' + side + '" style="margin-top:4px" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="' + side + '" data-qty="' + sz.contracts + '">Paper ' + sz.contracts + ' ' + side.toUpperCase() + '</button>' : '<div class="faint">No edge at this belief</div>') + '</div>';
+      };
+      out.innerHTML = box('yes') + box('no');
+    },
+    renderTicket() {
+      const m = S.universe.markets.get(S.sel); const box = $('sh-ticket'); if (!m || !box) return;
+      const t = S.sheet.ticket;
+      if (t.price === null) t.price = t.side === 'yes' ? (m.hasBid ? m.yb : 0.5) : (m.hasAsk ? U.round(1 - m.ya, 4) : 0.5);
+      box.innerHTML = '<div class="row" style="justify-content:space-between"><div class="seg"><button data-act="tside" data-s="yes"' + (t.side === 'yes' ? ' class="on"' : '') + '>YES</button><button data-act="tside" data-s="no"' + (t.side === 'no' ? ' class="on"' : '') + '>NO</button></div><div class="seg"><button data-act="ttype" data-s="market"' + (t.type === 'market' ? ' class="on"' : '') + '>Market</button><button data-act="ttype" data-s="limit"' + (t.type === 'limit' ? ' class="on"' : '') + '>Limit</button></div></div>' +
+        '<div class="grid"><label>Contracts<input class="inp" id="tk-qty" type="number" min="1" step="1" value="' + esc(t.qty) + '"></label><label' + (t.type === 'limit' ? '' : ' hidden') + '>Limit price (¢)<input class="inp" id="tk-price" type="number" min="1" max="99" step="1" value="' + Math.round(t.price * 100) + '"></label></div>' +
+        '<div class="preview" id="tk-preview"></div>' +
+        '<button class="btn primary block" data-act="place">Place paper order</button>' +
+        '<div class="faint small">Paper only. Market orders fill against the live book at taker fees; limit orders rest and fill when the market trades through your price. Nothing is sent to Kalshi.</div>';
+      this.renderTicketPreview();
+    },
+    renderTicketPreview() {
+      const m = S.universe.markets.get(S.sel); const pv = $('tk-preview'); if (!m || !pv) return;
+      const t = S.sheet.ticket;
+      const qty = U.num(($('tk-qty') || {}).value, t.qty);
+      const price = t.type === 'limit' ? U.num(($('tk-price') || {}).value, Math.round(t.price * 100)) / 100 : null;
+      const p = Desk.preview(m, t.side, qty, t.type, price, S.sheet.book);
+      pv.innerHTML = '<div><span>' + (t.type === 'limit' ? 'Rest ' : 'Buy ') + U.compact(p.filled || qty) + ' ' + t.side.toUpperCase() + '</span><span>' + (p.price !== null ? U.cents(p.price) + (t.type === 'market' && p.filled > 0 ? ' avg' : '') : '—') + '</span></div>' +
+        '<div><span>Fee (' + p.kind + ')</span><span>' + U.money(p.fee) + '</span></div>' +
+        '<div><span>Total</span><b>' + U.money(p.cost) + '</b></div>' +
+        '<div><span>Pays if right</span><span>' + U.money(p.filled || qty) + ' → ' + U.money((p.filled || qty) - p.cost, { plus: true }) + '</span></div>' +
+        '<div class="faint small" style="display:block">' + esc(p.note) + '</div>';
+    },
+
+    /* ----- AI ----- */
+    setAI(fn) {
+      S.ai = fn;
+      if (S.view === 'scanner') this.renderBrief();
+      if (S.sel) this.renderAI();
+    },
+    readPrompt(m, asJson) {
+      const ev = S.universe.events.get(m.event);
+      const recent = S.sheet.candles.slice(-24).map(c => U.cents(c.c, { bare: true })).join(', ');
+      const st = A.tapeStats(S.sheet.trades, 3600000 * 6);
+      const body = 'You are a careful prediction-market analyst helping a trader think about ONE Kalshi event contract. Today is ' + new Date().toDateString() + '. You have no live news and no browsing: reason from the market text below, general knowledge, base rates and the price action, and say when something hinges on news you cannot see. Be calibrated: a wide range is better than false precision. The market price is already a strong estimate; only disagree with it for a stated reason.\n\n' +
+        'EVENT: ' + (ev ? ev.title : m.event) + (ev && ev.category ? ' [' + ev.category + ']' : '') + (ev && ev.mutEx ? ' (one-winner event with ' + ev.markets.length + ' outcomes)' : '') + '\n' +
+        'MARKET: ' + (m.yesSub || m.title) + ' (' + m.ticker + ')\n' +
+        'RULES: ' + (m.rules || 'not loaded').slice(0, 2500) + (m.rules2 ? '\nSECONDARY: ' + m.rules2.slice(0, 800) : '') + '\n' +
+        'CLOSES: ' + U.dateShort(m.close) + ' (in ' + U.countdown(m.close) + ')\n' +
+        'PRICES (cents, YES): bid ' + U.cents(m.yb, { bare: true }) + ', ask ' + U.cents(m.ya, { bare: true }) + ', last ' + U.cents(m.last, { bare: true }) + ', a day ago ' + U.cents(m.prev, { bare: true }) + '\n' +
+        'VOLUME: total ' + Math.round(m.vol) + ', 24h ' + Math.round(m.vol24) + ', open interest ' + Math.round(m.oi) + '\n' +
+        (recent ? 'RECENT CLOSES (oldest→newest, cents): ' + recent + '\n' : '') +
+        (st.n ? 'RECENT TAKER FLOW: ' + Math.round(st.yesQty) + ' contracts bought YES vs ' + Math.round(st.noQty) + ' bought NO\n' : '');
+      if (asJson) return body + '\nReply with only a JSON object of this exact shape:\n{"probability":{"low":0.00,"mid":0.00,"high":0.00},"stance":"lean_yes"|"lean_no"|"no_edge","confidence":"low"|"medium"|"high","drivers":["up to 4 short points"],"watch_for":["up to 3 short points"],"risks":["up to 3 short points"],"verdict":"one plain sentence a trader can act on, including whether the price looks fair"}\nUse "no_edge" unless mid is clearly on one side of the ask/bid after fees (about 1.5¢).';
+      return body + '\nReply briefly with: a probability range for YES (low / mid / high), whether the current price looks fair, up to four drivers, what would change your mind, the key risks, and a one-sentence verdict. Say "no edge" unless your mid is clearly past the ask or bid after fees (about 1.5¢).';
+    },
+    briefPrompt(ops, asJson) {
+      const lines = ops.map((o, i) => { const m = S.universe.markets.get(o.tickers[0]); return (i + 1) + '. [' + KINDS[o.kind] + '] ' + o.title + ' — ' + o.headline + '. ' + o.math + (m && m.close ? ' Closes in ' + U.countdown(m.close) + '.' : ''); });
+      const body = 'You are a skeptical prediction-market desk lead. Today is ' + new Date().toDateString() + '. A scanner flagged these Kalshi signals from live quotes. You have no live news. For each, say in one sentence what would make it worth acting on or why to skip it, then give an overall two-sentence brief. Prefer "skip" over "act" when the edge is small, the fill size is small, or the risk is a single bad outcome.\n\n' + lines.join('\n');
+      if (asJson) return body + '\n\nReply with only JSON: {"summary":"two sentences","items":[{"n":1,"take":"one sentence","confidence":"low"|"medium"|"high","caution":"optional short caveat"}]}';
+      return body + '\n\nAnswer as a numbered list matching the signals, then the two-sentence brief.';
+    },
+    renderAI() {
+      const box = $('sh-ai'); if (!box) return;
+      const m = S.universe.markets.get(S.sel); if (!m) return;
+      if (!S.ai) { box.innerHTML = '<div class="row"><button class="btn sm" data-act="copyread">Copy a prompt for Claude</button><span class="faint small">This copy cannot call Claude directly; paste the prompt into a Claude chat for a calibrated read.</span></div>'; return; }
+      if (S.sheet.aiBusy) { box.innerHTML = '<div class="think">Thinking… Claude is reading the rules, prices and recent history.</div><div class="row"><button class="btn sm" data-act="aistop">Stop</button></div>'; return; }
+      const r = S.sheet.ai;
+      if (!r) { box.innerHTML = '<div class="row"><button class="btn sm primary" data-act="airead">Ask Claude for a read</button><span class="faint small">Uses your Claude account.</span></div>'; return; }
+      if (r.error) { box.innerHTML = '<div class="small down">' + esc(r.error) + '</div><div class="row"><button class="btn sm" data-act="airead">Try again</button></div>'; return; }
+      const p = r.probability || {};
+      const lo = U.clamp(U.num(p.low, 0), 0, 1), mid = U.clamp(U.num(p.mid, 0), 0, 1), hi = U.clamp(U.num(p.high, 0), 0, 1);
+      const mkt = m.mid !== null ? m.mid : (m.last || 0.5);
+      const list = (arr) => Array.isArray(arr) && arr.length ? '<ul>' + arr.slice(0, 5).map(x => '<li>' + esc(String(x)) + '</li>').join('') + '</ul>' : '';
+      box.innerHTML = '<div class="row"><span class="stance ' + esc(r.stance || 'no_edge') + '">' + esc(String(r.stance || 'no_edge').replace('_', ' ')) + '</span><span class="small muted">' + esc(r.confidence || '') + ' confidence · estimate ' + U.pct(lo, 0) + '–' + U.pct(hi, 0) + ', mid ' + U.pct(mid, 0) + ' · market ' + U.cents(mkt) + '</span></div>' +
+        '<div class="band"><div class="range" style="left:' + (lo * 100).toFixed(1) + '%;width:' + Math.max(0.5, (hi - lo) * 100).toFixed(1) + '%"></div><div class="mid" style="left:' + (mid * 100).toFixed(1) + '%"></div><div class="mkt" style="left:' + (mkt * 100).toFixed(1) + '%"></div><div class="lbl" style="left:' + (mid * 100).toFixed(1) + '%">Claude ' + U.pct(mid, 0) + '</div><div class="lbl" style="left:' + (mkt * 100).toFixed(1) + '%;top:-20px">market ' + U.cents(mkt) + '</div></div>' +
+        (r.verdict ? '<div class="verdict">' + esc(r.verdict) + '</div>' : '') +
+        (r.drivers && r.drivers.length ? '<div><div class="label" style="margin-bottom:4px">What drives it</div>' + list(r.drivers) + '</div>' : '') +
+        (r.watch_for && r.watch_for.length ? '<div><div class="label" style="margin-bottom:4px">What would change the read</div>' + list(r.watch_for) + '</div>' : '') +
+        (r.risks && r.risks.length ? '<div><div class="label" style="margin-bottom:4px">Risks</div>' + list(r.risks) + '</div>' : '') +
+        '<div class="faint small">Reasoning from the market text, the numbers on this page and general knowledge. No live news, no guarantee. Not advice.</div>' +
+        '<div class="row"><button class="btn sm" data-act="airead" data-fresh="1">Ask again</button></div>';
+    },
+    async aiRead(fresh) {
+      const m = S.universe.markets.get(S.sel); if (!m || !S.ai) return;
+      const t = S.sel;
+      const prompt = this.readPrompt(m, true);
+      S.sheet.aiBusy = true; S.sheet.ai = null; this.renderAI();
+      const ctl = new AbortController(); S.sheet.aiCtl = ctl;
+      try {
+        const data = await S.ai.json(prompt, { signal: ctl.signal, modelTier: 'default', cache: fresh ? false : true });
+        if (S.sel !== t) return;
+        S.sheet.ai = (data && typeof data === 'object') ? data : { error: 'Claude did not return a usable read.' };
+      } catch (e) {
+        if (S.sel !== t) return;
+        const code = e && e.code;
+        if (code === 'cancelled') S.sheet.ai = null;
+        else if (code === 'not_granted' || code === 'sampling_disabled' || code === 'not_declared' || code === 'capability_disabled') { this.setAI(null); return; }
+        else S.sheet.ai = { error: code === 'rate_limited' ? 'Claude is busy or your usage limit is reached. Try again in a bit.' : code === 'invalid_json' ? 'Claude answered in prose instead of data. Try again.' : code === 'refused' ? 'Claude declined to read this one.' : 'Could not reach Claude (' + esc(code || 'error') + ').' };
+      } finally { if (S.sel === t) { S.sheet.aiBusy = false; this.renderAI(); } }
+    },
+    async aiBrief() {
+      if (!S.ai) return;
+      const ops = this.briefOps();
+      if (!ops.length) { this.toast('Nothing to brief yet'); return; }
+      const prompt = this.briefPrompt(ops, true);
+      S.scanner.briefBusy = true; this.renderBrief();
+      const ctl = new AbortController(); S.scanner.briefCtl = ctl;
+      try {
+        const data = await S.ai.json(prompt, { signal: ctl.signal, modelTier: 'default', cache: false });
+        const items = Array.isArray(data && data.items) ? data.items.map(it => { const o = ops[U.num(it.n, 0) - 1]; return o ? { key: this.opKey(o), take: String(it.take || ''), confidence: String(it.confidence || ''), caution: it.caution ? String(it.caution) : '' } : null; }).filter(Boolean) : [];
+        S.scanner.brief = { at: Date.now(), summary: String((data && data.summary) || ''), items: items };
+      } catch (e) {
+        const code = e && e.code;
+        if (code === 'not_granted' || code === 'sampling_disabled' || code === 'not_declared' || code === 'capability_disabled') { this.setAI(null); return; }
+        if (code !== 'cancelled') this.toast('Claude could not brief the scan (' + (code || 'error') + ')');
+      } finally { S.scanner.briefBusy = false; this.renderScanner(); }
+    },
+
+    /* ----- setup ----- */
+    renderSetup() {
+      const s = S.settings;
+      const conn = $('setup-conn');
+      const relay = (s.relayUrl || '').trim();
+      const statusLine = S.mode === 'live' ? '<span class="dot live"></span> Live through ' + (S.source === 'relay' ? (S.sameOrigin ? 'this site\'s built-in relay' : 'your relay at ' + esc(Engine.relayLabel())) : 'a direct connection') + (s.env === 'demo' ? ' (demo exchange)' : '') : '<span class="dot sim"></span> Simulated data' + (S.health.lastErr && S.ctx !== 'artifact' ? ' · last error: ' + esc(S.health.lastErr) : '');
+      const recipe = '<ol class="steps"><li>Create a free Cloudflare account, then open <b>Workers &amp; Pages → Create → Start with Hello World</b> and give the worker a name such as <code>edge-desk</code>.</li><li>Replace the editor contents with the <code>edge-desk.worker.js</code> file from this chat and tap <b>Deploy</b>. (From a terminal, <code>npx wrangler deploy</code> next to the included <code>wrangler.toml</code> does the same.)</li><li>Open the worker\'s URL, which looks like <code>https://edge-desk.yourname.workers.dev</code>. That page is this app with live Kalshi quotes, on any device. Optional: a worker variable named <code>RELAY_KEY</code> locks the relay to copies that know the key.</li></ol>';
+      let guide = '';
+      if (S.ctx === 'artifact') guide = '<div style="margin-top:12px"><p class="small" style="margin:0 0 10px"><b>Why this copy is simulated.</b> Pages inside Claude cannot call outside APIs, and Kalshi\'s API refuses browser requests anyway (no CORS headers). The live version is the same app served from your own free Cloudflare Worker, which also relays Kalshi\'s public, read-only market data. It never holds an API key and cannot trade.</p>' + recipe + '</div>';
+      else if (S.mode !== 'live' && !relay) guide = '<div style="margin-top:12px"><p class="small" style="margin:0 0 10px"><b>Go live in about two minutes.</b> Kalshi\'s API refuses requests that carry a browser Origin, so Edge Desk reads through a tiny relay that strips it, adds CORS headers and caches responses for a few seconds. The relay only forwards public read-only market data.</p>' + recipe + '<p class="small" style="margin:10px 0 0">Prefer to keep using this file? Paste the worker URL into the Relay URL field below and tap <b>Reconnect</b>.</p></div>';
+      conn.innerHTML = '<div class="card" style="margin-bottom:16px"><div class="row" style="justify-content:space-between"><div class="row">' + statusLine + '</div><div class="row">' + (S.ctx === 'artifact' ? '' : '<button class="btn sm" data-act="testconn">Test connection</button>') + '<button class="btn sm primary" data-act="reconnect">Reconnect</button></div></div><div id="conn-result" class="small" style="margin-top:8px"></div>' + guide + '</div>';
+      const field = (id, labelTxt, inputHtml, help) => '<div class="field"><label for="' + id + '">' + labelTxt + '</label>' + inputHtml + (help ? '<div class="help">' + help + '</div>' : '') + '</div>';
+      const sel = (id, val, opts) => '<select class="sel" id="' + id + '" data-set="' + id + '">' + opts.map(o => '<option value="' + o[0] + '"' + (String(val) === String(o[0]) ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>';
+      const inp = (id, val, attrs) => '<input class="inp" id="' + id + '" data-set="' + id + '" value="' + esc(val) + '" ' + (attrs || '') + '>';
+      const sourceFields = S.ctx === 'artifact' ? '' :
+        '<h3 class="label">Data source</h3>' +
+        field('relayUrl', 'Relay URL', inp('relayUrl', s.relayUrl, 'type="url" placeholder="https://edge-desk.yourname.workers.dev" autocomplete="off" spellcheck="false"'), S.ctx === 'hosted' ? 'Leave empty when this page is served by the worker; it relays on its own address.' : 'Leave empty to try a direct connection (blocked by Kalshi today) and fall back to simulated data.') +
+        '<div class="field-row">' + field('relayKey', 'Relay key (optional)', inp('relayKey', s.relayKey, 'type="password" autocomplete="off"'), 'Must match RELAY_KEY on the worker.') + field('env', 'Exchange', sel('env', s.env, [['prod', 'Production (real markets)'], ['demo', 'Demo exchange']]), 'The demo exchange has sparse, fake markets; useful for testing.') + '</div>' +
+        field('dataMode', 'Mode', sel('dataMode', s.dataMode, [['auto', 'Auto (relay, then direct, then simulated)'], ['relay', 'Relay only'], ['direct', 'Direct only'], ['sim', 'Simulated data']]), '');
+      $('setup-form').innerHTML = sourceFields +
+        '<h3 class="label" style="margin-top:8px">Polling</h3>' +
+        '<div class="field-row">' + field('pollTape', 'Tape every (s)', inp('pollTape', s.pollTape, 'type="number" min="2" max="60"'), '') + field('pollMarkets', 'Watched markets every (s)', inp('pollMarkets', s.pollMarkets, 'type="number" min="5" max="120"'), '') + '</div>' +
+        '<div class="field-row">' + field('pollBook', 'Open market book every (s)', inp('pollBook', s.pollBook, 'type="number" min="2" max="60"'), '') + field('universePages', 'Universe pages', inp('universePages', s.universePages, 'type="number" min="1" max="60"'), 'Each page is 200 events with all their markets (a few MB). More pages widen the scan and slow the first load; pages render as they arrive.') + '</div>' +
+        field('universeRefreshMin', 'Reload universe every (min)', inp('universeRefreshMin', s.universeRefreshMin, 'type="number" min="2" max="120"'), 'Watched markets, positions and scanner hits refresh far more often than this.') +
+        '<h3 class="label" style="margin-top:8px">Fees and sizing</h3>' +
+        '<div class="field-row">' + field('rounding', 'Fee rounding', sel('rounding', s.rounding, [['centicent', 'Centicent ($0.0001, direct Kalshi accounts)'], ['cent', 'Whole cent (brokerage / FCM accounts)']]), '') + field('takerRate', 'Taker rate', inp('takerRate', s.takerRate, 'type="number" step="0.005" min="0" max="0.2"'), 'Kalshi\'s schedule: 0.07 × contracts × P × (1−P), rounded up. Series multipliers are read from the API.') + '</div>' +
+        '<div class="field-row">' + field('kelly', 'Kelly fraction', sel('kelly', s.kelly, [['1', 'Full'], ['0.5', 'Half'], ['0.25', 'Quarter'], ['0.1', 'Tenth']]), '') + field('minSpread', 'Flag spreads from (¢)', inp('minSpread', Math.round(s.minSpread * 100), 'type="number" min="2" max="40"'), '') + '</div>' +
+        field('bigPrint', 'Big print threshold (contracts)', inp('bigPrint', s.bigPrint, 'type="number" min="50" step="50"'), 'Prints at or above this size are highlighted on the tape.') +
+        '<h3 class="label" style="margin-top:8px">Storage</h3>' +
+        '<p class="small muted" style="margin:0">' + (Persist.cloud ? 'Your watchlist, paper desk and settings are saved to your Claude account and follow you across devices.' : 'Saved in this browser only. Open this page from the Claude app to sync across devices.') + '</p>' +
+        '<div class="field"><label for="import-box">Import a desk export</label><textarea class="inp" id="import-box" rows="3" placeholder="Paste an export here"></textarea><div class="row"><button class="btn sm" data-act="import">Import</button></div></div>' +
+        '<div class="disclaimer">Edge Desk is an independent analysis tool and is not affiliated with Kalshi. It shows public market data and simulated paper trades. Nothing here is investment advice; event contracts can lose the entire amount risked.</div>';
+    },
+    applySetting(id, value) {
+      const s = S.settings;
+      const nums = ['pollTape', 'pollMarkets', 'pollBook', 'universePages', 'universeRefreshMin', 'takerRate', 'bigPrint'];
+      if (nums.includes(id)) { const n = U.num(value); if (n === null) return; s[id] = n; }
+      else if (id === 'minSpread') { const n = U.num(value); if (n === null) return; s.minSpread = n / 100; }
+      else if (id === 'kelly') s.kelly = U.num(value, 0.25);
+      else if (id === 'slim') s.slim = value === '1';
+      else s[id] = value;
+      Persist.save();
+      if (id === 'minSpread' || id === 'takerRate' || id === 'rounding') Scanner.run();
+    },
+    async testConnection() {
+      const box = $('conn-result'); if (!box) return;
+      box.textContent = 'Testing…';
+      const r = await Engine.testConnection();
+      const line = (name, x) => x === null ? '' : '<div>' + name + ': ' + (x.ok ? '<span class="up">OK</span> · exchange ' + (x.st && x.st.trading_active ? 'open' : 'closed or paused') : '<span class="down">failed</span> · ' + esc(x.msg)) + '</div>';
+      box.innerHTML = line('Relay', r.relay) + line('This site', r.same) + line('Direct', r.direct) + (!(r.relay && r.relay.ok) && !(r.same && r.same.ok) && !(r.direct && r.direct.ok) ? '<div class="muted">A direct connection is expected to fail; deploy the worker above.</div>' : '');
+    }
+  };
+
+  /* ---------- actions ---------- */
+  function openTicket(ticker, side, type, price, qty) {
+    const prefill = () => { const t = S.sheet.ticket; if (side) t.side = side; if (type) t.type = type; if (price) t.price = U.num(price, t.price); if (qty) t.qty = Math.max(1, U.num(qty, t.qty)); UI.renderTicket(); const el = $('sh-ticket'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
+    if (S.sel === ticker && !$('sheet').hidden) prefill();
+    else Engine.openMarket(ticker).then(() => { if (S.sel === ticker) prefill(); });
+  }
+  function placeOrder() {
+    const m = S.universe.markets.get(S.sel); if (!m) return;
+    const t = S.sheet.ticket;
+    const qty = U.num(($('tk-qty') || {}).value, t.qty);
+    const price = t.type === 'limit' ? U.num(($('tk-price') || {}).value, Math.round(t.price * 100)) / 100 : null;
+    const r = Desk.buy(m, t.side, qty, t.type, price, S.sheet.book);
+    UI.toast(r.msg);
+    if (r.ok) { UI.onDesk(); UI.renderTicketPreview(); }
+  }
+  function paperSet(idx, n) {
+    const o = S.scanner.ops[idx]; if (!o || o.kind !== 'arb') return;
+    let placed = 0;
+    for (const t of o.tickers) { const m = S.universe.markets.get(t); if (!m) continue; const r = Desk.buy(m, o.sub === 'no' ? 'no' : 'yes', n, 'market', null, null); if (r.ok) placed++; else { UI.toast(r.msg); break; } }
+    if (placed) UI.toast('Paper: bought ' + o.sub.toUpperCase() + ' on ' + placed + ' of ' + o.tickers.length + ' legs, ' + n + ' each');
+    UI.onDesk();
+  }
+  function copyText(text, doneMsg) {
+    const done = () => UI.toast(doneMsg || ('Copied ' + (text.length > 40 ? text.slice(0, 40) + '…' : text)));
+    try { navigator.clipboard.writeText(text).then(done, () => fallback()); } catch (e) { fallback(); }
+    function fallback() { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { UI.toast('Select and copy: ' + text); } ta.remove(); }
+  }
+
+  document.addEventListener('click', (ev) => {
+    const el = ev.target.closest('[data-act]');
+    if (!el) return;
+    const act = el.dataset.act;
+    if (el.tagName === 'A' && act !== 'none') ev.preventDefault();
+    if (act === 'nav') { UI.nav(el.dataset.v); return; }
+    if (act === 'open') { ev.stopPropagation(); Engine.openMarket(el.dataset.t); return; }
+    if (act === 'ticket') { ev.stopPropagation(); openTicket(el.dataset.t, el.dataset.side, el.dataset.type, el.dataset.price, el.dataset.qty); return; }
+    if (act === 'watch') { ev.stopPropagation(); const t = el.dataset.t; if (S.watch.has(t)) { S.watch.delete(t); UI.toast('Removed from watchlist'); } else { S.watch.add(t); UI.toast('Watching ' + t); } Persist.save(); UI.render(); if (S.sel) UI.renderSheet(); return; }
+    if (act === 'skind') { S.scanner.kind = el.dataset.k; UI.renderScanner(); return; }
+    if (act === 'mcat') { UI.mk.cat = el.dataset.c; UI.mk.limit = 80; UI.renderMarkets(); return; }
+    if (act === 'mmore') { UI.mk.limit += 120; UI.renderMarkets(); return; }
+    if (act === 'range') { S.sheet.range = el.dataset.r; UI.renderSheet(); Engine.loadCandles(); return; }
+    if (act === 'tside') { S.sheet.ticket.side = el.dataset.s; S.sheet.ticket.price = null; UI.renderTicket(); return; }
+    if (act === 'ttype') { S.sheet.ticket.type = el.dataset.s; UI.renderTicket(); return; }
+    if (act === 'place') { placeOrder(); return; }
+    if (act === 'paperset') { paperSet(U.num(el.dataset.i, -1), U.num(el.dataset.n, 1)); return; }
+    if (act === 'sell') { const r = Desk.sell(el.dataset.k); UI.toast(r.msg); UI.onDesk(); return; }
+    if (act === 'cancel') { Desk.cancel(el.dataset.id); UI.onDesk(); return; }
+    if (act === 'reset1') { $('desk-reset-confirm').innerHTML = '<button class="btn sm danger" data-act="reset2">Confirm reset</button>'; return; }
+    if (act === 'reset2') { const b = U.num(($('desk-bankroll') || {}).value, S.desk.start) || 1000; Desk.reset(b); UI.toast('Paper account reset to ' + U.money(b)); return; }
+    if (act === 'export') { const box = $('desk-export'); box.innerHTML = '<textarea class="inp" rows="4" readonly id="export-box">' + esc(JSON.stringify(Persist.snapshot())) + '</textarea><div class="row" style="margin-top:6px"><button class="btn sm" data-act="copyexport">Copy export</button></div>'; return; }
+    if (act === 'copyexport') { copyText($('export-box').value); return; }
+    if (act === 'import') { try { const data = JSON.parse($('import-box').value); Persist.apply(data); Persist.save(); UI.toast('Imported'); UI.render(); } catch (e) { UI.toast('That is not a valid export'); } return; }
+    if (act === 'copy') { copyText(el.dataset.text); return; }
+    if (act === 'airead') { UI.aiRead(!!el.dataset.fresh); return; }
+    if (act === 'copyread') { const m = S.universe.markets.get(S.sel); if (m) copyText(UI.readPrompt(m, false), 'Prompt copied. Paste it into a Claude chat.'); return; }
+    if (act === 'copybrief') { const ops = UI.briefOps(); if (ops.length) copyText(UI.briefPrompt(ops, false), 'Prompt copied. Paste it into a Claude chat.'); return; }
+    if (act === 'aistop') { if (S.sheet.aiCtl) S.sheet.aiCtl.abort(); return; }
+    if (act === 'brief') { UI.aiBrief(); return; }
+    if (act === 'briefstop') { if (S.scanner.briefCtl) S.scanner.briefCtl.abort(); return; }
+    if (act === 'testconn') { UI.testConnection(); return; }
+    if (act === 'reconnect') { Engine.stop(); S.mode = 'boot'; S.source = 'none'; S.health.lastErr = ''; S.health.errors = 0; S.blocked = {}; S.universe = { events: new Map(), markets: new Map(), loadedAt: 0, pages: 0, loading: false }; S.tape = { trades: [], seen: new Set(), lastTs: 0, paused: S.tape.paused }; S.scanner.ops = []; S.scanner.brief = null; UI.closeSheet(); Engine.boot().then(() => UI.renderSetup()); return; }
+  });
+  document.querySelectorAll('#nav button[data-nav]').forEach(b => b.addEventListener('click', () => UI.nav(b.dataset.nav)));
+  $('sh-close').addEventListener('click', () => UI.closeSheet());
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !$('sheet').hidden) UI.closeSheet(); });
+  document.addEventListener('input', (ev) => {
+    const el = ev.target;
+    if (!el || !el.id) return;
+    if (el.id === 'mk-search') { UI.mk.search = el.value; UI.mk.limit = 80; UI.renderMarkets(); }
+    else if (el.id === 'tape-filter') { UI.tp.filter = el.value; UI.renderTape(); }
+    else if (el.id === 'calc-q') { S.sheet.calcQ = U.num(el.value, 50); UI.renderCalcOut(); }
+    else if (el.id === 'calc-bank' || el.id === 'calc-kelly') { if (el.id === 'calc-bank') S.settings.bankroll = U.num(el.value, S.settings.bankroll); UI.renderCalcOut(); }
+    else if (el.id === 'tk-qty' || el.id === 'tk-price') { if (el.id === 'tk-qty') S.sheet.ticket.qty = U.num(el.value, S.sheet.ticket.qty); if (el.id === 'tk-price') S.sheet.ticket.price = U.num(el.value, 50) / 100; UI.renderTicketPreview(); }
+  });
+  document.addEventListener('change', (ev) => {
+    const el = ev.target;
+    if (!el || !el.id) return;
+    if (el.dataset && el.dataset.set) { UI.applySetting(el.dataset.set, el.value); return; }
+    if (el.id === 'mk-sort') { UI.mk.sort = el.value; UI.renderMarkets(); }
+    else if (el.id === 'mk-watch-only') { UI.mk.watchOnly = el.checked; UI.renderMarkets(); }
+    else if (el.id === 'tape-min') { UI.tp.min = U.num(el.value, 0); UI.renderTape(); }
+    else if (el.id === 'tape-pause') { S.tape.paused = el.checked; }
+    else if (el.id === 'calc-kelly') { S.settings.kelly = U.num(el.value, 0.25); Persist.save(); UI.renderCalcOut(); }
+    else if (el.id === 'desk-bankroll') { /* applied on reset */ }
+  });
+  window.addEventListener('hashchange', () => { const v = location.hash.replace('#', ''); if (VIEWS.includes(v) && v !== S.view) UI.nav(v, false); });
+  window.addEventListener('resize', U.debounce(() => { if (S.sel && !$('sheet').hidden) { UI.renderChart(); UI.renderSheetLive(); } if (S.view === 'desk') Chart.spark($('desk-equity'), $('desk-equity-tip'), S.desk.equity); }, 200));
+  const themeMq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  const onTheme = () => { if (S.sel && !$('sheet').hidden) { UI.renderChart(); UI.renderSheetLive(); } if (S.view === 'desk') UI.renderDesk(); };
+  if (themeMq && themeMq.addEventListener) themeMq.addEventListener('change', onTheme);
+  if (window.MutationObserver) new MutationObserver(onTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && S.mode !== 'boot') { Engine.refreshTracked().catch(noteError); Engine.pollTape().catch(noteError); } });
+
+  /* ---------- boot ---------- */
+  (async function boot() {
+    Persist.apply(Persist.loadLocal());
+    if (!S.desk) S.desk = window.EDApp.newDesk(S.settings.bankroll);
+    const v = location.hash.replace('#', '');
+    UI.nav(VIEWS.includes(v) ? v : 'scanner', false);
+    UI.renderStatus();
+    Engine.boot();
+    // capabilities arrive later; light features up when they do
+    Persist.initCloud().then(cloud => {
+      if (cloud === null) return;
+      const local = Persist.loadLocal();
+      if (cloud && cloud.v && (!local || (cloud.updatedAt || 0) > (local.updatedAt || 0))) { Persist.apply(cloud); UI.render(); if (S.sel) UI.renderSheet(); }
+      else Persist.flush(Persist.snapshot());
+      if (S.view === 'setup') UI.renderSetup();
+    });
+    if (window.claude && typeof window.claude.use === 'function') {
+      window.claude.use('sample').then(fn => { if (fn) UI.setAI(fn); }).catch(() => { /* unavailable */ });
+    }
+  })();
+})();
+</script>
+</body></html>

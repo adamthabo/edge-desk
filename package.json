@@ -1,0 +1,10 @@
+{
+  "name": "edge-desk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Edge Desk: Kalshi market scanner, live tape, fee-aware edge math and paper-trading desk, served from one Cloudflare Worker that relays Kalshi's public market data.",
+  "scripts": {
+    "deploy": "npx wrangler deploy",
+    "dev": "npx wrangler dev"
+  }
+}

@@ -1,0 +1,82 @@
+<header id="top">
+  <div class="brand"><h1>Edge Desk</h1><span class="tag">Kalshi analysis</span></div>
+  <div class="status" id="status">
+    <span class="row" style="gap:6px"><span class="dot" id="st-dot"></span><span id="st-text">Starting</span></span>
+    <span class="chip" id="st-source">—</span>
+    <span id="st-exchange" class="nowrap"></span>
+    <span id="st-updated" class="nowrap faint"></span>
+  </div>
+</header>
+
+<main id="main">
+  <section class="view" id="view-scanner">
+    <div id="scanner-banner"></div>
+    <div class="view-head"><h2>Scanner</h2><span class="sub" id="scanner-sub">Opportunities across the loaded market universe</span></div>
+    <div class="chips scroll" id="scanner-chips"></div>
+    <div id="scanner-brief"></div>
+    <div id="scanner-list" class="cards" style="margin-top:12px"></div>
+    <div class="disclaimer">Edge Desk analyzes public quotes and flags patterns worth a closer look. It is not financial advice, it does not know the news, and prediction markets can lose your entire stake. The paper desk is a simulation; anything real happens on Kalshi, under your own judgment.</div>
+  </section>
+
+  <section class="view" id="view-markets" hidden>
+    <div class="view-head"><h2>Markets</h2><span class="sub" id="markets-sub"></span></div>
+    <div class="toolbar">
+      <div class="search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="mk-search" type="search" placeholder="Search title or ticker" autocomplete="off"></div>
+      <select class="sel" id="mk-sort"><option value="vol24">24h volume</option><option value="vol">Total volume</option><option value="oi">Open interest</option><option value="close">Closing soonest</option><option value="move">Biggest move</option><option value="spread">Widest spread</option></select>
+      <label class="chip"><input type="checkbox" id="mk-watch-only" style="margin:0"> Watchlist</label>
+    </div>
+    <div class="chips scroll" id="mk-cats"></div>
+    <div class="list" id="mk-list" style="margin-top:10px"></div>
+    <div id="mk-more" style="margin-top:12px"></div>
+  </section>
+
+  <section class="view" id="view-tape" hidden>
+    <div class="view-head"><h2>Tape</h2><span class="sub">Every print on the exchange, newest first</span></div>
+    <div class="tape-stats" id="tape-stats"></div>
+    <div class="toolbar">
+      <div class="search"><input id="tape-filter" type="search" placeholder="Filter by ticker or title" autocomplete="off"></div>
+      <select class="sel" id="tape-min"><option value="0">All sizes</option><option value="50">50+ contracts</option><option value="200">200+</option><option value="500">500+ (big prints)</option><option value="2000">2,000+</option></select>
+      <label class="chip"><input type="checkbox" id="tape-pause" style="margin:0"> Pause</label>
+    </div>
+    <div id="tape-list"></div>
+  </section>
+
+  <section class="view" id="view-desk" hidden>
+    <div class="view-head"><h2>Paper desk</h2><span class="sub">Simulated fills at live quotes, with Kalshi's fee schedule</span></div>
+    <div class="tiles" id="desk-tiles"></div>
+    <div class="chart-wrap"><canvas id="desk-equity" height="110"></canvas><div class="chart-tip" id="desk-equity-tip"></div></div>
+    <div class="section"><h3>Positions</h3><div id="desk-positions"></div></div>
+    <div class="section"><h3>Resting orders</h3><div id="desk-orders"></div></div>
+    <div class="section"><h3>Fills</h3><div id="desk-fills"></div></div>
+    <div class="section"><h3>Account</h3><div class="row" id="desk-account"></div></div>
+  </section>
+
+  <section class="view" id="view-setup" hidden>
+    <div class="view-head"><h2>Setup</h2><span class="sub">Data source, intervals, fees and your paper account</span></div>
+    <div id="setup-conn"></div>
+    <div class="form" id="setup-form"></div>
+  </section>
+</main>
+
+<nav id="nav" aria-label="Views">
+  <div class="navbrand brand"><h1>Edge Desk</h1></div>
+  <button data-nav="scanner" class="on"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>Scanner</span></button>
+  <button data-nav="markets"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Markets</span></button>
+  <button data-nav="tape"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h13"/><circle cx="19" cy="12" r="1.5"/></svg><span>Tape</span></button>
+  <button data-nav="desk"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M8 15h4"/></svg><span>Desk</span></button>
+  <button data-nav="setup"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Setup</span></button>
+</nav>
+
+<aside id="sheet" hidden aria-label="Market detail">
+  <div class="sheet-head">
+    <div class="grow">
+      <div class="label" id="sh-event"></div>
+      <h2 id="sh-title"></h2>
+      <div class="small muted row" id="sh-meta" style="margin-top:4px"></div>
+    </div>
+    <button class="btn ghost sm" id="sh-close" aria-label="Close market panel">Close</button>
+  </div>
+  <div class="sheet-body" id="sh-body"></div>
+</aside>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>

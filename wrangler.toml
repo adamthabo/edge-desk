@@ -1,0 +1,7 @@
+name = "edge-desk"
+main = "edge-desk.worker.js"
+compatibility_date = "2026-06-01"
+# Optional: lock the relay to copies that know a key, and/or to one origin.
+# [vars]
+# RELAY_KEY = "choose-a-secret"
+# ALLOWED_ORIGIN = "https://edge-desk.yourname.workers.dev"

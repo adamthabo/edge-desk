@@ -5,11 +5,12 @@
 #   edge-desk.worker.js  Cloudflare Worker serving the page at / and relaying Kalshi's public API
 set -euo pipefail
 cd "$(dirname "$0")"
-node --check src/core.js && node --check src/plain.js && node --check src/app1.js && node --check src/acct.js && node --check src/app2.js && node --check src/app3.js && node --check src/app4.js && node --check src/worker-desk.js && node --check src/worker-engine.js
+node --check src/core.js && node --check src/plain.js && node --check src/lessons.js && node --check src/app1.js && node --check src/acct.js && node --check src/app2.js && node --check src/app3.js && node --check src/app4.js && node --check src/worker-desk.js && node --check src/worker-engine.js
 {
   cat src/head.html
   cat src/body.html
   echo '<script>'; cat src/core.js; echo '</script>'
+  echo '<script>'; cat src/lessons.js; echo '</script>'
   echo '<script>'; cat src/plain.js; echo '</script>'
   echo '<script>'; cat src/app1.js; echo '</script>'
   echo '<script>'; cat src/acct.js; echo '</script>'

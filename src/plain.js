@@ -57,9 +57,59 @@
     longshot: { what: 'An outcome priced at a few cents. People tend to overpay for longshots, so betting against them has, on average, had a slight edge.', win: 'A small, frequent profit when the longshot misses, as it usually does.', lose: 'When it hits, you lose the full stake. One miss wipes out many wins.' }
   };
 
+  const KIND_DO = {
+    arb: (o) => o.sub === 'no' ? 'Buy NO on every outcome, ' + U.compact(Math.max(1, Math.floor(o.size))) + ' set' + (o.size >= 2 ? 's' : '') + ' at most, with fill-or-cancel orders at the quoted bids.' : 'Buy YES on every outcome with fill-or-cancel orders at the quoted asks; no more than the size shown.',
+    yield: (o) => 'Only if you can say why the other side is this unlikely: buy ' + o.side.toUpperCase() + ' at ' + U.cents(o.price) + ', sized so a miss would not hurt.',
+    spread: (o) => 'Do not cross this spread. If you want the market, rest a bid at ' + U.cents(o.yb + 0.01) + ' and let others come to you.',
+    mover: () => 'Find out why it moved before doing anything. No news you can name, no trade.',
+    volume: () => 'Nothing to do by itself. Heavy trading means prices here are probably fair; use it to pick markets to watch.',
+    longshot: (o) => 'A small NO bet at ' + U.cents(o.noPrice) + ' is defensible as part of many such bets, never as a single large one.'
+  };
   const P = {
     GLOSSARY: GLOSSARY,
     KIND_PLAIN: KIND_PLAIN,
+    KIND_DO: KIND_DO,
+    // three-layer block: simple line, then "Why" and "The math" as expanders
+    layer(simple, why, deep, opts) {
+      opts = opts || {};
+      if (!this.on()) return '';
+      return '<div class="layer' + (opts.cls ? ' ' + opts.cls : '') + '">' +
+        '<div class="layer-do"><span class="layer-l">' + esc(opts.label || 'Do this') + '</span>' + simple + '</div>' +
+        (why ? '<details class="layer-d"><summary>Why</summary><div class="layer-body">' + why + '</div></details>' : '') +
+        (deep ? '<details class="layer-d"><summary>' + esc(opts.deepLabel || 'The math') + '</summary><div class="layer-body">' + deep + '</div></details>' : '') + '</div>';
+    },
+    opDo(o) { const f = KIND_DO[o.kind]; return f ? f(o) : ''; },
+    lessonsHtml() {
+      const L = window.EDLessons; if (!L) return '';
+      const start = '<section><h3>Start here</h3><p>Three habits make the difference: read prices as probabilities, bet only when your reason beats the fee, and keep score honestly. Each lesson below has a one-line answer, the reasoning, and the math; read the first layer of all of them, then come back for the rest.</p>' +
+        '<div class="decide">' + L.DECIDE.map((d, i) => '<div class="decide-row"><div class="decide-q"><span class="decide-n">' + (i + 1) + '</span>' + esc(d.q) + '</div><div class="decide-a"><span class="up">Yes:</span> ' + esc(d.yes) + ' <span class="down">No:</span> ' + esc(d.no) + '</div></div>').join('') + '</div></section>';
+      const lessons = L.LESSONS.map(l => '<section id="lesson-' + l.id + '"><h3>' + esc(l.title) + '</h3><p class="lesson-simple">' + esc(l.simple) + '</p><details class="layer-d"><summary>Why</summary><div class="layer-body"><p>' + esc(l.why) + '</p></div></details><details class="layer-d"><summary>The math</summary><div class="layer-body"><p>' + esc(l.deep) + '</p></div></details></section>').join('');
+      return '<div class="guide">' + start + lessons + '<section><h3>Before you trade for real</h3><p>Edge Desk places real orders only when you unlock your account and ask it to, or when you start the engine inside caps you set. Event contracts can lose the entire amount risked. This is a tool, not advice.</p></section></div>';
+    },
+    // market panel decision at the user's belief
+    decision(m, q, info, rounding, bankroll, kellyFrac) {
+      if (!this.on()) return '';
+      const F = window.ED.F, A = window.ED.A;
+      const yesPx = m.hasAsk ? m.ya : null, noPx = m.hasBid ? U.round(1 - m.yb, 4) : null;
+      const ey = yesPx !== null ? A.edge(q, 'yes', yesPx, F.perContract(yesPx, 'taker', info, rounding)) : null;
+      const en = noPx !== null ? A.edge(q, 'no', noPx, F.perContract(noPx, 'taker', info, rounding)) : null;
+      const margin = 0.015;
+      let simple, why, deep;
+      const pick = (ey && ey.ev > margin) ? ey : (en && en.ev > margin) ? en : null;
+      if (!pick) {
+        const gap = Math.max(ey ? ey.ev : -1, en ? en.ev : -1);
+        simple = '<b>Nothing to do</b> at a ' + Math.round(q * 100) + '% belief. The market and you agree within fees' + (gap > 0 ? ' (best edge ' + U.cents(gap) + ', under the 1.5¢ margin)' : '') + '.';
+        why = '<p>A bet needs to clear the fee and a margin for being wrong about the probability. Here the better side would make ' + (gap > 0 ? U.cents(gap) : 'nothing') + ' per contract on average, which is inside the noise. Passing is the right answer most of the time; it costs nothing.</p>';
+        deep = '<p>EV(YES) = ' + (ey ? U.signed(ey.ev * 100, 1) + '¢' : '—') + ' at ' + U.cents(yesPx) + '; EV(NO) = ' + (en ? U.signed(en.ev * 100, 1) + '¢' : '—') + ' at ' + U.cents(noPx) + '. Breakeven beliefs: YES ' + (ey ? U.pct(ey.breakeven, 1) : '—') + ', NO ' + (en ? U.pct(1 - en.breakeven, 1) : '—') + ' (as P(YES)). Move the slider to see where a side turns positive.</p>';
+      } else {
+        const side = pick.side.toUpperCase();
+        const sz = A.sizeFor(bankroll, kellyFrac, pick);
+        simple = '<b>Buy ' + side + '</b> at ' + U.cents(pick.price) + ' or better, up to <b>' + sz.contracts + ' contracts</b> (' + U.money(sz.stake) + ') at your ' + Math.round(q * 100) + '% belief. If you cannot get that price, rest a bid instead of chasing.';
+        why = '<p>At ' + Math.round(q * 100) + '% you believe ' + side + ' is worth ' + U.cents(pick.p) + ' and it costs ' + U.cents(pick.cost) + ' with the fee, so each contract makes about ' + U.cents(pick.ev) + ' on average. That is only an average: this single bet still loses ' + U.pct(1 - pick.p, 0) + ' of the time, which is why the size is a quarter of the Kelly amount.</p>';
+        deep = '<p>EV = p − (price + fee) = ' + U.cents(pick.p) + ' − (' + U.cents(pick.price) + ' + ' + U.cents(pick.fee) + ') = ' + U.cents(pick.ev) + '. Return on cost ' + U.signed(pick.roi * 100, 1) + '%. Kelly f* = (p − c)/(1 − c) = ' + U.pct(pick.kelly, 1) + ' of bankroll; × ' + kellyFrac + ' = ' + U.pct(pick.kelly * kellyFrac, 1) + ' → ' + U.money(sz.stake) + ' → ' + sz.contracts + ' contracts. The other side: ' + (pick === ey ? (en ? 'NO at ' + U.cents(noPx) + ' has EV ' + U.signed(en.ev * 100, 1) + '¢' : 'no NO offer') : (ey ? 'YES at ' + U.cents(yesPx) + ' has EV ' + U.signed(ey.ev * 100, 1) + '¢' : 'no YES offer')) + '.</p>';
+      }
+      return this.layer(simple, why, deep, { label: 'What to do' });
+    },
     on() { return !(window.EDS && window.EDS.settings && window.EDS.settings.explain === false); },
     // inline tappable term
     term(key, text) {
@@ -128,6 +178,7 @@
       return this.hint('<p>Edge Desk watches the public prices of a few thousand Kalshi markets and flags six kinds of situations that experienced traders look for. Each card says what the numbers show, what has to be true for it to make money, and how it loses. None of it is a recommendation: the scanner reads prices, not news.</p>');
     },
     guideHtml() {
+      if (window.EDLessons) return this.lessonsHtml();
       const T = (k, t) => this.term(k, t);
       return '<div class="guide">' +
         '<section><h3>What Kalshi is</h3><p>A regulated exchange where people trade yes-or-no questions about the real world: will the Fed cut rates, will it rain in New York tomorrow, who wins the game. Each question is a ' + T('contract') + '. If you hold <b>YES</b> and the thing happens, Kalshi pays you $1 per contract; if it does not, the contract is worth nothing. <b>NO</b> is the mirror image.</p><p>The ' + T('price') + ' is the crowd\'s estimate of the odds. YES at 42¢ means traders collectively think there is about a 42% chance. Buy YES at 42¢ and you risk 42¢ to make 58¢. Buy NO at 58¢ and you risk 58¢ to make 42¢.</p></section>' +

@@ -285,6 +285,25 @@ textarea.inp { width: 100%; font-family: var(--font-mono); font-size: 12px; }
 details.rules summary { cursor: pointer; font-weight: 500; }
 details.rules p { white-space: pre-wrap; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
 
+/* layered explanations */
+.layer { display: grid; gap: 4px; border-left: 2px solid var(--line); padding: 6px 0 6px 12px; font-size: 13.5px; line-height: 1.5; }
+.layer-do { color: var(--fg); }
+.layer-l { display: block; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; color: var(--fg-3); margin-bottom: 2px; font-stretch: 90%; }
+.layer-d summary { cursor: pointer; font-size: 12px; color: var(--fg-2); font-weight: 600; list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; }
+.layer-d summary::-webkit-details-marker { display: none; }
+.layer-d summary::before { content: "+"; display: inline-flex; width: 14px; height: 14px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 3px; font-size: 11px; color: var(--fg-3); }
+.layer-d[open] summary::before { content: "−"; }
+.layer-body { color: var(--fg-2); font-size: 13px; line-height: 1.55; padding: 4px 0 4px 20px; }
+.layer-body p { margin: 0; } .layer-body p + p { margin-top: 6px; }
+.layer-body .note { color: var(--fg-3); font-size: 12.5px; }
+.lesson-simple { color: var(--fg) !important; font-weight: 500; }
+.decide { display: grid; gap: 8px; margin-top: 10px; }
+.decide-row { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev); font-size: 13px; }
+.decide-q { font-weight: 600; display: flex; gap: 8px; align-items: baseline; color: var(--fg); }
+.decide-n { width: 18px; height: 18px; border-radius: 50%; background: var(--ink); color: var(--ink-fg); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.decide-a { color: var(--fg-2); margin-top: 4px; padding-left: 26px; }
+.guide .layer-d { margin-top: 6px; }
+
 /* real-money ticket */
 .realbox { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--down); border-radius: var(--radius); background: var(--down-soft); }
 .realbox .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

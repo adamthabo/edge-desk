@@ -285,6 +285,25 @@ textarea.inp { width: 100%; font-family: var(--font-mono); font-size: 12px; }
 details.rules summary { cursor: pointer; font-weight: 500; }
 details.rules p { white-space: pre-wrap; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
 
+/* layered explanations */
+.layer { display: grid; gap: 4px; border-left: 2px solid var(--line); padding: 6px 0 6px 12px; font-size: 13.5px; line-height: 1.5; }
+.layer-do { color: var(--fg); }
+.layer-l { display: block; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; color: var(--fg-3); margin-bottom: 2px; font-stretch: 90%; }
+.layer-d summary { cursor: pointer; font-size: 12px; color: var(--fg-2); font-weight: 600; list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; }
+.layer-d summary::-webkit-details-marker { display: none; }
+.layer-d summary::before { content: "+"; display: inline-flex; width: 14px; height: 14px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 3px; font-size: 11px; color: var(--fg-3); }
+.layer-d[open] summary::before { content: "−"; }
+.layer-body { color: var(--fg-2); font-size: 13px; line-height: 1.55; padding: 4px 0 4px 20px; }
+.layer-body p { margin: 0; } .layer-body p + p { margin-top: 6px; }
+.layer-body .note { color: var(--fg-3); font-size: 12.5px; }
+.lesson-simple { color: var(--fg) !important; font-weight: 500; }
+.decide { display: grid; gap: 8px; margin-top: 10px; }
+.decide-row { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev); font-size: 13px; }
+.decide-q { font-weight: 600; display: flex; gap: 8px; align-items: baseline; color: var(--fg); }
+.decide-n { width: 18px; height: 18px; border-radius: 50%; background: var(--ink); color: var(--ink-fg); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.decide-a { color: var(--fg-2); margin-top: 4px; padding-left: 26px; }
+.guide .layer-d { margin-top: 6px; }
+
 /* real-money ticket */
 .realbox { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--down); border-radius: var(--radius); background: var(--down-soft); }
 .realbox .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -378,7 +397,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
     <span class="chip" id="st-source">—</span>
     <span id="st-exchange" class="nowrap"></span>
     <span id="st-updated" class="nowrap faint"></span>
-    <button class="btn sm" data-act="guide" id="guide-btn">How it works</button>
+    <button class="btn sm" data-act="guide" id="guide-btn">Learn</button>
   </div>
 </header>
 
@@ -1166,6 +1185,88 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
 <script>
+/* Edge Desk lessons: the knowledge core, written in three layers (simple → why → the math). */
+(function () {
+  'use strict';
+  const LESSONS = [
+    {
+      id: 'price', title: 'A price is a probability',
+      simple: 'A YES price of 42¢ means the crowd thinks there is about a 42% chance the thing happens. NO is always the mirror: 58¢.',
+      why: 'Every contract pays $1 if you are right and $0 if not, so paying 42¢ only makes sense if you think the chance is better than 42%. That turns every market into a simple question: is the real chance higher or lower than the price? Everything else on this desk is a way of answering that question carefully.',
+      deep: 'Price ≈ probability holds because a contract is a bet with a $1 payout: fair price = P(YES) × $1. The last cent or two of a price is noise from the spread and from fees, so treat "the price" as the midpoint between the best bid and the best ask. A NO contract at (1 − price) is the same claim from the other side; buying NO at 58¢ is identical to selling YES at 42¢.'
+    },
+    {
+      id: 'yesno', title: 'YES or NO? Neither is smarter',
+      simple: 'Think in probabilities, not sides. Whichever side is cheaper than your estimate is the right side; if neither beats the fee, do nothing.',
+      why: 'YES and NO are the same bet seen from opposite ends, so neither is "the smart side." Take a market at 42¢ with a 1.7¢ fee. If you believe 50%, YES is cheap by 8¢: buy YES. If you believe 35%, YES is overpriced by 7¢, which means NO at 58¢ is cheap by 7¢: buy NO. If you believe 40–44%, neither side beats the fee, and the right move is nothing. Most of the time that is the answer.',
+      deep: 'EV(YES) = p − (ask_yes + fee); EV(NO) = (1 − p) − (ask_no + fee), and since ask_no ≈ 1 − bid_yes, the two are mirror images separated by the spread. Buying both at the asks always loses the spread: 43¢ + 59¢ = $1.02 for a sure $1.00. The two honest versions of "both" are market making (rest bids under both asks, e.g. 41¢ + 57¢ = 98¢, earned only when both fill) and hedging later (bought YES at 30¢, price now 60¢: buying NO at 40¢ locks 30¢, the same as selling at 60¢).'
+    },
+    {
+      id: 'spread', title: 'Two prices, one spread',
+      simple: 'There is a bid (most anyone will pay) and an ask (least anyone will sell for). Trade now and you pay the gap plus a fee; wait with your own order and you can be paid instead.',
+      why: 'Crossing the spread is the quiet cost that eats small edges. In a market quoted 40 / 44, buying at 44 and selling at 40 a minute later loses 4¢ before fees. Resting your own bid at 41 means you only trade when someone comes to you, and most Kalshi markets charge no fee for that. The catch: a resting order may never fill, or fill only when the price is moving against you.',
+      deep: 'Kalshi\'s taker fee is ceil(0.07 × contracts × P × (1 − P)), largest at 50¢ (1.75¢ per contract) and tiny near 1¢ or 99¢; makers pay 0 on most series and 0.0175 × P × (1 − P) on a few (sports among them). A 4¢ spread at 50¢ therefore costs a taker about 5.75¢ round trip, which is why the Scanner flags wide spreads as something to quote inside, not something to cross.'
+    },
+    {
+      id: 'edge', title: 'Edge, in one line',
+      simple: 'Edge = your probability − what you pay (price plus fee). Positive edge means the price is in your favor; it says nothing about any single outcome.',
+      why: 'A bet with 5¢ of edge still loses often. Edge is an average that shows up over many bets, which is why the desk sizes small and keeps a journal: one result tells you nothing, a hundred tell you whether your probabilities are better than the market\'s. The breakeven belief is the probability at which the bet neither makes nor loses on average; if your honest estimate is below it, pass.',
+      deep: 'Per contract: EV = p − c where c = price + fee. Return on capital = EV / c. Breakeven belief = c. Variance per contract ≈ p(1 − p), so the standard deviation of the average over n bets shrinks as 1/√n: with 3¢ of true edge at 50¢ you need on the order of 300 bets before the result is distinguishable from luck. That is why the calibration tile, not the P&L, is the thing to watch early.'
+    },
+    {
+      id: 'kelly', title: 'How much to bet',
+      simple: 'Bet a fraction of your bankroll that grows with your edge and shrinks with the price. The desk uses a quarter of the Kelly size, which is what careful bettors do.',
+      why: 'Betting too much is the fastest way to lose with a winning strategy: a few bad results in a row wipe out the bankroll before the edge can show. Kelly is the size that grows a bankroll fastest if your probability is exactly right; since it never is, a quarter of it gives up a little growth for far smaller swings. The per-game and total caps exist because correlated bets (two buckets of the same event, two legs of one game) behave like one big bet.',
+      deep: 'Kelly fraction f* = (p − c) / (1 − c) with c = price + fee. Example: p = 0.50, c = 0.44 → f* = 0.107 of bankroll; quarter Kelly = 2.7%, so $13 on a $500 bankroll, about 30 contracts at 44¢. Full Kelly has roughly a 50% chance of halving the bankroll at some point; quarter Kelly cuts the drawdown about fourfold while keeping about three quarters of the growth rate.'
+    },
+    {
+      id: 'arb', title: 'Locked profits (arbitrage)',
+      simple: 'When one event has several outcomes but only one can win, the YES prices should add up to about $1. When they don\'t, a set of trades can lock in a profit whichever outcome happens.',
+      why: 'If the YES bids on all four outcomes of "which number will the jobs report show" add up to 107¢, buying NO on every outcome costs $2.93 per set and pays back at least $3.00 no matter what. That is the closest thing to free money here. It is rare, small, limited to the size resting on the book, and it disappears quickly. The Scanner also checks the other direction (asks summing under $1) but only calls it a lock when the list of outcomes covers every possibility.',
+      deep: 'Sell-the-book: Σ bid_i > 1 + Σ fees ⇒ buy NO on all legs; payout ≥ (n − 1) dollars if at most one leg settles YES, n dollars if none does. Buy-the-book: Σ ask_i < 1 − Σ fees ⇒ buy YES on all legs; payout exactly $1 only if the legs are exhaustive (a catch-all leg, or numeric buckets with open ends). Margin per set is tiny, so the desk also annualizes it over the time to settlement: 0.7¢ on $2.93 settling in 10 days is 8.7% annualized; the same margin over three years is noise.'
+    },
+    {
+      id: 'sharp', title: 'Why sharp sportsbooks are the yardstick',
+      simple: 'Pinnacle and a few other books take huge bets from professionals and move their lines fast. Their devigged odds are the best public estimate of a game\'s outcome.',
+      why: 'Kalshi\'s sports prices are set by its own traders, who are often slower than the sharp books after injury news or sharp money. When Kalshi\'s price is a few cents off the books, the books are usually right. The engine does not pretend to know football; it borrows the books\' probability and acts only on the gap. The gap is usually small, so the engine is patient and stops before kickoff, when pre-game lines stop describing the market.',
+      deep: 'Devig: convert decimal odds to implied probabilities (1/odds) and normalize so they sum to 1 (multiplicative method; Shin or power methods differ by a fraction of a cent at these margins). Books are combined by weight (Pinnacle 3, Lowvig and BetOnline 2, US books 1). The engine then shrinks toward Kalshi\'s mid: p* = 0.8 × p_books + 0.2 × mid, so Kalshi\'s own information is not ignored. Ties are rare in these sports and are ignored by the two-way devig; that is a small, known bias.'
+    },
+    {
+      id: 'engine', title: 'What the engine does, step by step',
+      simple: 'Every minute it matches Kalshi games to sharp lines, buys when Kalshi is clearly wrong, otherwise rests bids below fair value, pulls everything before kickoff, holds to settlement, and writes down what it believed.',
+      why: 'The rules are deliberately boring. It never chases a price, never bets on a game it cannot match to a line, never exceeds the caps you set, and stops itself for the day after a set loss. Boring is what lets a small edge survive contact with real markets; most people lose not because their ideas are wrong but because they size badly or bet when there is nothing to do.',
+      deep: 'Take when ask + fee + margin ≤ p* (margin default 2¢), fill-or-cancel, size by quarter Kelly capped by room under the per-game and total limits and by the size on offer. Otherwise quote a post-only bid at floor(p* − 3¢ − maker fee), re-quoted when p* moves a cent, never crossing the ask. Quotes are cancelled when kickoff is within 2 minutes or the match is lost. Resting orders are reconciled against the exchange each tick; filled positions are settled from Kalshi\'s result and the P&L, fees and Brier terms are journaled by strategy kind.'
+    },
+    {
+      id: 'calibration', title: 'Am I actually good at this?',
+      simple: 'The calibration tile compares the probabilities you (or the engine) believed with what actually happened, and does the same for the market\'s prices. If your number is not lower than the market\'s, you have no edge, whatever the P&L says.',
+      why: 'P&L is noisy; a lucky week looks exactly like skill. Calibration asks a sharper question: when you said 60%, did it happen about 60% of the time, and did you do that better than the price did? It needs volume to mean anything, roughly a hundred settled bets before the comparison is worth trusting, which is another reason to start small.',
+      deep: 'Brier score = mean of (p − outcome)² over settled bets, where outcome is 1 or 0; lower is better, 0.25 is a coin flip. The desk computes it for p* and for the market mid at the time of the bet. A difference of 0.01–0.02 in your favor over a few hundred bets is a real edge in these markets; anything smaller is inside the noise. ROI by strategy kind (taker vs maker) shows where the edge actually comes from.'
+    },
+    {
+      id: 'risk', title: 'Risk rules that keep you in the game',
+      simple: 'Small bets, hard caps, a daily stop, and never averaging down. The goal of the first months is to still be playing, not to be rich.',
+      why: 'Every rule here exists because of a common way people blow up: betting bigger after losses, stacking correlated bets, trading in-play with a pre-game model, or trusting a hot streak. The daily stop turns a bad day into a small number instead of a story. The per-game cap keeps one upset from mattering. The kickoff rule keeps the engine out of markets its model does not describe.',
+      deep: 'With quarter Kelly on true 3¢ edges, a 20% drawdown is ordinary and a 35% drawdown is possible in a bad quarter; the daily stop ($50 on $500) bounds the per-day damage at 10%. Caps are additive across both legs of a game because the engine\'s bids on both teams can fill together. The Worker\'s MAX_ORDER_* limits sit underneath everything as a hard floor that no setting on the page can lift.'
+    },
+    {
+      id: 'firstweeks', title: 'Your first two weeks',
+      simple: 'Week one: paper only, read every "Why." Week two: engine on at the default caps, dry run first, check the calibration tile daily, change nothing else.',
+      why: 'The desk gets more useful once you have watched it be wrong a few times. Paper trading at live prices with real fees shows you how often "obvious" bets lose and how much the spread costs. The engine\'s dry run shows what it would do and why before it risks a dollar. Resist raising caps on a good week; raise them when the calibration tile has earned it.',
+      deep: 'A reasonable escalation rule: after 100 settled engine bets with Brier(p*) < Brier(market) and ROI > 0, double the per-game cap once; repeat the test before each further increase. If Brier(p*) ≥ Brier(market) after 200 bets, the books are not sharper than Kalshi on those games; turn the taker side off and keep only the maker side, or switch sports. Keep the daily stop at 10% of bankroll throughout.'
+    }
+  ];
+  // decision guide shown in Learn
+  const DECIDE = [
+    { q: 'Do I have a reason my probability should differ from the price?', yes: 'Go on.', no: 'Pass. The price is already a good forecast.' },
+    { q: 'Is the gap bigger than the fee plus a margin (about 3¢)?', yes: 'Go on.', no: 'Pass; the edge is inside the noise and the spread.' },
+    { q: 'Can I get filled near the quote (tight spread, size on the book)?', yes: 'Go on.', no: 'Rest a limit order inside the spread instead of crossing it.' },
+    { q: 'Is the size a quarter of Kelly or less, and inside my caps?', yes: 'Place it, on paper first if you are new.', no: 'Cut the size. The edge does not get bigger because you bet more.' }
+  ];
+  window.EDLessons = { LESSONS, DECIDE };
+})();
+</script>
+<script>
 /* Edge Desk plain-language layer: glossary, guide, and "in plain terms" translations of signals and markets. */
 (function () {
   'use strict';
@@ -1225,9 +1326,59 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
     longshot: { what: 'An outcome priced at a few cents. People tend to overpay for longshots, so betting against them has, on average, had a slight edge.', win: 'A small, frequent profit when the longshot misses, as it usually does.', lose: 'When it hits, you lose the full stake. One miss wipes out many wins.' }
   };
 
+  const KIND_DO = {
+    arb: (o) => o.sub === 'no' ? 'Buy NO on every outcome, ' + U.compact(Math.max(1, Math.floor(o.size))) + ' set' + (o.size >= 2 ? 's' : '') + ' at most, with fill-or-cancel orders at the quoted bids.' : 'Buy YES on every outcome with fill-or-cancel orders at the quoted asks; no more than the size shown.',
+    yield: (o) => 'Only if you can say why the other side is this unlikely: buy ' + o.side.toUpperCase() + ' at ' + U.cents(o.price) + ', sized so a miss would not hurt.',
+    spread: (o) => 'Do not cross this spread. If you want the market, rest a bid at ' + U.cents(o.yb + 0.01) + ' and let others come to you.',
+    mover: () => 'Find out why it moved before doing anything. No news you can name, no trade.',
+    volume: () => 'Nothing to do by itself. Heavy trading means prices here are probably fair; use it to pick markets to watch.',
+    longshot: (o) => 'A small NO bet at ' + U.cents(o.noPrice) + ' is defensible as part of many such bets, never as a single large one.'
+  };
   const P = {
     GLOSSARY: GLOSSARY,
     KIND_PLAIN: KIND_PLAIN,
+    KIND_DO: KIND_DO,
+    // three-layer block: simple line, then "Why" and "The math" as expanders
+    layer(simple, why, deep, opts) {
+      opts = opts || {};
+      if (!this.on()) return '';
+      return '<div class="layer' + (opts.cls ? ' ' + opts.cls : '') + '">' +
+        '<div class="layer-do"><span class="layer-l">' + esc(opts.label || 'Do this') + '</span>' + simple + '</div>' +
+        (why ? '<details class="layer-d"><summary>Why</summary><div class="layer-body">' + why + '</div></details>' : '') +
+        (deep ? '<details class="layer-d"><summary>' + esc(opts.deepLabel || 'The math') + '</summary><div class="layer-body">' + deep + '</div></details>' : '') + '</div>';
+    },
+    opDo(o) { const f = KIND_DO[o.kind]; return f ? f(o) : ''; },
+    lessonsHtml() {
+      const L = window.EDLessons; if (!L) return '';
+      const start = '<section><h3>Start here</h3><p>Three habits make the difference: read prices as probabilities, bet only when your reason beats the fee, and keep score honestly. Each lesson below has a one-line answer, the reasoning, and the math; read the first layer of all of them, then come back for the rest.</p>' +
+        '<div class="decide">' + L.DECIDE.map((d, i) => '<div class="decide-row"><div class="decide-q"><span class="decide-n">' + (i + 1) + '</span>' + esc(d.q) + '</div><div class="decide-a"><span class="up">Yes:</span> ' + esc(d.yes) + ' <span class="down">No:</span> ' + esc(d.no) + '</div></div>').join('') + '</div></section>';
+      const lessons = L.LESSONS.map(l => '<section id="lesson-' + l.id + '"><h3>' + esc(l.title) + '</h3><p class="lesson-simple">' + esc(l.simple) + '</p><details class="layer-d"><summary>Why</summary><div class="layer-body"><p>' + esc(l.why) + '</p></div></details><details class="layer-d"><summary>The math</summary><div class="layer-body"><p>' + esc(l.deep) + '</p></div></details></section>').join('');
+      return '<div class="guide">' + start + lessons + '<section><h3>Before you trade for real</h3><p>Edge Desk places real orders only when you unlock your account and ask it to, or when you start the engine inside caps you set. Event contracts can lose the entire amount risked. This is a tool, not advice.</p></section></div>';
+    },
+    // market panel decision at the user's belief
+    decision(m, q, info, rounding, bankroll, kellyFrac) {
+      if (!this.on()) return '';
+      const F = window.ED.F, A = window.ED.A;
+      const yesPx = m.hasAsk ? m.ya : null, noPx = m.hasBid ? U.round(1 - m.yb, 4) : null;
+      const ey = yesPx !== null ? A.edge(q, 'yes', yesPx, F.perContract(yesPx, 'taker', info, rounding)) : null;
+      const en = noPx !== null ? A.edge(q, 'no', noPx, F.perContract(noPx, 'taker', info, rounding)) : null;
+      const margin = 0.015;
+      let simple, why, deep;
+      const pick = (ey && ey.ev > margin) ? ey : (en && en.ev > margin) ? en : null;
+      if (!pick) {
+        const gap = Math.max(ey ? ey.ev : -1, en ? en.ev : -1);
+        simple = '<b>Nothing to do</b> at a ' + Math.round(q * 100) + '% belief. The market and you agree within fees' + (gap > 0 ? ' (best edge ' + U.cents(gap) + ', under the 1.5¢ margin)' : '') + '.';
+        why = '<p>A bet needs to clear the fee and a margin for being wrong about the probability. Here the better side would make ' + (gap > 0 ? U.cents(gap) : 'nothing') + ' per contract on average, which is inside the noise. Passing is the right answer most of the time; it costs nothing.</p>';
+        deep = '<p>EV(YES) = ' + (ey ? U.signed(ey.ev * 100, 1) + '¢' : '—') + ' at ' + U.cents(yesPx) + '; EV(NO) = ' + (en ? U.signed(en.ev * 100, 1) + '¢' : '—') + ' at ' + U.cents(noPx) + '. Breakeven beliefs: YES ' + (ey ? U.pct(ey.breakeven, 1) : '—') + ', NO ' + (en ? U.pct(1 - en.breakeven, 1) : '—') + ' (as P(YES)). Move the slider to see where a side turns positive.</p>';
+      } else {
+        const side = pick.side.toUpperCase();
+        const sz = A.sizeFor(bankroll, kellyFrac, pick);
+        simple = '<b>Buy ' + side + '</b> at ' + U.cents(pick.price) + ' or better, up to <b>' + sz.contracts + ' contracts</b> (' + U.money(sz.stake) + ') at your ' + Math.round(q * 100) + '% belief. If you cannot get that price, rest a bid instead of chasing.';
+        why = '<p>At ' + Math.round(q * 100) + '% you believe ' + side + ' is worth ' + U.cents(pick.p) + ' and it costs ' + U.cents(pick.cost) + ' with the fee, so each contract makes about ' + U.cents(pick.ev) + ' on average. That is only an average: this single bet still loses ' + U.pct(1 - pick.p, 0) + ' of the time, which is why the size is a quarter of the Kelly amount.</p>';
+        deep = '<p>EV = p − (price + fee) = ' + U.cents(pick.p) + ' − (' + U.cents(pick.price) + ' + ' + U.cents(pick.fee) + ') = ' + U.cents(pick.ev) + '. Return on cost ' + U.signed(pick.roi * 100, 1) + '%. Kelly f* = (p − c)/(1 − c) = ' + U.pct(pick.kelly, 1) + ' of bankroll; × ' + kellyFrac + ' = ' + U.pct(pick.kelly * kellyFrac, 1) + ' → ' + U.money(sz.stake) + ' → ' + sz.contracts + ' contracts. The other side: ' + (pick === ey ? (en ? 'NO at ' + U.cents(noPx) + ' has EV ' + U.signed(en.ev * 100, 1) + '¢' : 'no NO offer') : (ey ? 'YES at ' + U.cents(yesPx) + ' has EV ' + U.signed(ey.ev * 100, 1) + '¢' : 'no YES offer')) + '.</p>';
+      }
+      return this.layer(simple, why, deep, { label: 'What to do' });
+    },
     on() { return !(window.EDS && window.EDS.settings && window.EDS.settings.explain === false); },
     // inline tappable term
     term(key, text) {
@@ -1296,6 +1447,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
       return this.hint('<p>Edge Desk watches the public prices of a few thousand Kalshi markets and flags six kinds of situations that experienced traders look for. Each card says what the numbers show, what has to be true for it to make money, and how it loses. None of it is a recommendation: the scanner reads prices, not news.</p>');
     },
     guideHtml() {
+      if (window.EDLessons) return this.lessonsHtml();
       const T = (k, t) => this.term(k, t);
       return '<div class="guide">' +
         '<section><h3>What Kalshi is</h3><p>A regulated exchange where people trade yes-or-no questions about the real world: will the Fed cut rates, will it rain in New York tomorrow, who wins the game. Each question is a ' + T('contract') + '. If you hold <b>YES</b> and the thing happens, Kalshi pays you $1 per contract; if it does not, the contract is worth nothing. <b>NO</b> is the mirror image.</p><p>The ' + T('price') + ' is the crowd\'s estimate of the odds. YES at 42¢ means traders collectively think there is about a 42% chance. Buy YES at 42¢ and you risk 42¢ to make 58¢. Buy NO at 58¢ and you risk 58¢ to make 42¢.</p></section>' +
@@ -2425,13 +2577,13 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
       const briefHtml = brief ? '<div class="small" style="padding:8px 10px;background:var(--bg-sunk);border-radius:var(--radius)"><b>Claude:</b> ' + esc(brief.take) + (brief.caution ? ' <span class="muted">' + esc(brief.caution) + '</span>' : '') + ' <span class="faint">(' + esc(brief.confidence || '') + ' confidence)</span></div>' : '';
       const kp = P.KIND_PLAIN[o.kind];
       const kindTip = kp ? '<button type="button" class="kind ' + o.kind + ' kindbtn" data-kind-tip="' + o.kind + '" aria-label="What is ' + KINDS[o.kind] + '?">' + KINDS[o.kind] + ' <span aria-hidden="true">?</span></button>' : '<span class="kind ' + o.kind + '">' + KINDS[o.kind] + '</span>';
+      const plainWhy = P.opPlain(o, S.universe.markets).replace(/^<div class="plain"><span class="plain-l">In plain terms<\/span>/, '').replace(/<\/div>$/, '');
+      const layered = P.on() ? P.layer(esc(P.opDo(o)), plainWhy + '<p class="note">' + esc(o.note) + '</p>', '<p>' + esc(o.math) + '</p>') : '<div class="math">' + esc(o.math) + '</div><div class="note">' + esc(o.note) + '</div>';
       return '<div class="card opp" data-op="' + esc(this.opKey(o)) + '">' +
         '<div class="opp-head">' + kindTip + (cat ? '<span class="faint small">' + esc(cat) + '</span>' : '') + (m0 && m0.close ? '<span class="faint small" style="margin-left:auto">' + T('closes', 'closes') + ' ' + U.countdown(m0.close) + '</span>' : '') + '</div>' +
         '<div class="title">' + esc(o.title) + '</div>' +
-        '<div class="headline">' + esc(o.headline) + '</div>' +
-        '<div class="math">' + esc(o.math) + '</div>' + legs +
-        P.opPlain(o, S.universe.markets) +
-        '<div class="note">' + esc(o.note) + '</div>' + briefHtml +
+        '<div class="headline">' + esc(o.headline) + '</div>' + legs +
+        layered + briefHtml +
         '<div class="actions">' + actions + '</div></div>';
     },
     opKey(o) { return o.kind + ':' + (o.sub || '') + ':' + o.tickers.join(','); },
@@ -2593,7 +2745,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
         '<div class="facts" id="sh-facts"></div>' +
         '<div><div class="row" style="justify-content:space-between;margin-bottom:6px"><span class="label">Price history</span><div class="seg">' + ['1D', '1W', '1M', 'All'].map(r => '<button data-act="range" data-r="' + r + '"' + (S.sheet.range === r ? ' class="on"' : '') + '>' + r + '</button>').join('') + '</div></div><div class="chart-wrap"><canvas id="sh-chart" height="190"></canvas><div class="chart-tip" id="sh-chart-tip"></div></div><div class="faint small" id="sh-chart-note" style="margin-top:4px"></div></div>' +
         '<div><div class="label" style="margin-bottom:6px">' + T('book', 'Order book') + '</div>' + (S.blocked.book ? '<div class="empty">Kalshi\'s order book endpoint asked for authentication, so depth is hidden. Top-of-book bid, ask and size still update from the market record.</div>' : '<div class="chart-wrap"><canvas id="sh-depth" height="120"></canvas><div class="chart-tip" id="sh-depth-tip"></div></div><div class="ladder" id="sh-ladder" style="margin-top:8px"></div>' + (P.on() ? '<div class="faint small" style="margin-top:6px">Left: how many contracts people want to buy at each price (' + T('bid', 'bids') + '). Right: how many are for sale at each price (' + T('ask', 'offers') + '). Bigger bars mean more money waiting there.</div>' : '')) + '</div>' +
-        '<div class="section" style="margin-top:0"><h3>Edge calculator</h3>' + P.calcPlain() + '<div class="calc" id="sh-calc" style="margin-top:8px"></div></div>' +
+        '<div class="section" style="margin-top:0"><h3>Should I bet on this?</h3>' + (P.on() ? '<div class="small muted" style="margin-bottom:6px">Set the chance <i>you</i> believe; the desk tells you whether either side is worth it, how much, and why.</div>' : '') + '<div class="calc" id="sh-calc" style="margin-top:8px"></div></div>' +
         '<div class="section" style="margin-top:0"><h3>Paper ticket</h3>' + P.ticketPlain() + '<div class="ticket" id="sh-ticket" style="margin-top:8px"></div></div>' +
         '<div class="section" style="margin-top:0"><h3>Claude\'s read</h3><div class="ai" id="sh-ai"></div></div>' +
         '<div class="section" style="margin-top:0"><h3>Recent trades</h3><div id="sh-trades"></div></div>' +
@@ -2647,6 +2799,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
       if (S.sheet.calcQ === null) S.sheet.calcQ = m.mid !== null ? Math.round(m.mid * 100) : 50;
       box.innerHTML = '<div class="slider"><div class="row" style="justify-content:space-between"><span class="small muted">Your probability of YES</span><b id="calc-q-label">' + S.sheet.calcQ + '%</b></div><input type="range" id="calc-q" min="1" max="99" value="' + S.sheet.calcQ + '"></div>' +
         '<div class="row small muted" style="gap:14px"><label class="row" style="gap:6px">Bankroll <input class="inp" id="calc-bank" type="number" min="1" step="50" value="' + esc(S.settings.bankroll) + '" style="width:96px;padding:4px 6px"></label><label class="row" style="gap:6px">Kelly <select class="sel" id="calc-kelly" style="padding:4px 6px"><option value="1"' + (S.settings.kelly === 1 ? ' selected' : '') + '>Full</option><option value="0.5"' + (S.settings.kelly === 0.5 ? ' selected' : '') + '>Half</option><option value="0.25"' + (S.settings.kelly === 0.25 ? ' selected' : '') + '>Quarter</option><option value="0.1"' + (S.settings.kelly === 0.1 ? ' selected' : '') + '>Tenth</option></select></label></div>' +
+        '<div id="calc-decision"></div>' +
         '<div class="evgrid" id="calc-out"></div>' +
         '<div class="faint small">' + T('ev', 'EV') + ' uses the taker price plus Kalshi\'s ' + T('fee', 'fee') + ' for one contract. ' + T('kelly', 'Kelly size') + ' assumes your probability is exactly right, which it is not; fractional Kelly is the usual correction.</div>';
       this.renderCalcOut();
@@ -2672,6 +2825,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
           (good ? '<div>' + T('kelly', 'Kelly') + ' ' + U.pct(e.kelly, 1) + ' → <b>' + sz.contracts + ' contracts</b> (' + U.money(sz.stake) + ')</div><button class="btn sm ' + side + '" style="margin-top:4px" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="' + side + '" data-qty="' + sz.contracts + '">Paper ' + sz.contracts + ' ' + side.toUpperCase() + '</button>' : '<div class="faint">No edge at this belief</div>') + '</div>';
       };
       out.innerHTML = box('yes') + box('no');
+      const dec = $('calc-decision'); if (dec) dec.innerHTML = P.decision(m, q, info, S.settings.rounding, bank, kf);
     },
     ticketModeBar() {
       const acct = window.EDAcct;
@@ -2940,7 +3094,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
     if (act === 'import') { try { const data = JSON.parse($('import-box').value); Persist.apply(data); Persist.save(); UI.toast('Imported'); UI.render(); } catch (e) { UI.toast('That is not a valid export'); } return; }
     if (act === 'copy') { copyText(el.dataset.text); return; }
     if (act === 'airead') { UI.aiRead(!!el.dataset.fresh); return; }
-    if (act === 'guide') { $('guide-body').innerHTML = P.guideHtml(); $('guide').hidden = false; $('guide-body').scrollTop = 0; UI.markGuideSeen(); UI.renderPrimer(); return; }
+    if (act === 'guide') { $('guide-body').innerHTML = P.guideHtml(); $('guide-title').textContent = 'Learn'; $('guide').hidden = false; $('guide-body').scrollTop = 0; UI.markGuideSeen(); UI.renderPrimer(); if (el.dataset.lesson) { const sec = $('lesson-' + el.dataset.lesson); if (sec) { sec.scrollIntoView(); sec.querySelectorAll('details').forEach(d => d.open = true); } } return; }
     if (act === 'guideclose') { $('guide').hidden = true; return; }
     if (act === 'primerdismiss') { UI.markGuideSeen(); UI.renderPrimer(); return; }
     if (act === 'copyread') { const m = S.universe.markets.get(S.sel); if (m) copyText(UI.readPrompt(m, false), 'Prompt copied. Paste it into a Claude chat.'); return; }
@@ -3251,7 +3405,12 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
         (last.errors && last.errors.length ? '<div class="small down">' + last.errors.map(esc).join(' · ') + '</div>' : '') +
         '<div class="row small muted" style="gap:14px">' + (last.ts ? '<span>' + (last.matched || 0) + ' games matched · ' + (last.unmatched || 0) + ' unmatched</span><span>' + (last.taker || 0) + ' taken · ' + (last.maker || 0) + ' quoted · ' + (last.cancels || 0) + ' cancelled</span>' + (last.exposure !== undefined ? '<span>exposure ' + U.money(last.exposure) + '</span>' : '') : '') + (stats.oddsRemaining !== null && stats.oddsRemaining !== undefined ? '<span>odds credits left ' + U.compact(stats.oddsRemaining) + '</span>' : '') + (last.odds ? '<span>' + Object.entries(last.odds).map(([k, v]) => k + ': ' + esc(v)).join(' · ') + '</span>' : '') + '</div>' +
         '<div id="eng-confirm"></div></div>';
-      html += P.on() ? P.hint('<p>The engine compares every Kalshi game it can match to sharp sportsbook lines (Pinnacle first). When Kalshi\'s price is wrong by more than fees plus your margin it buys at once; otherwise it rests its own bid a step below fair value and gets paid the spread. It pulls every quote before kickoff, holds to settlement, never exceeds the caps below, and journals each bet with the probability it believed so you can see whether it is actually better calibrated than the market.</p>') : '';
+      const meansSimple = !s.oddsKey ? 'Add the sharp-lines key to the Worker, then run a dry run. Nothing can happen until then.'
+        : !on ? 'The engine is off; nothing happens on its own. Run a <b>dry run</b> to see what it would do tonight, then <b>Start trading</b> if the plans look sensible.'
+        : (last.matched ? 'Running. It is watching ' + last.matched + ' game' + (last.matched > 1 ? 's' : '') + ' and acting on its own inside your caps. You do not need to do anything; glance at Today and Calibration once a day.' : 'Running, but no games match the enabled sports right now. It will act when lines and games line up.');
+      const meansWhy = '<p>The engine borrows the sharp books\' probability for each team and only acts on the gap between that and Kalshi\'s price: it buys when Kalshi is clearly too cheap, otherwise it rests a bid below fair value and waits to be paid the spread. It pulls every quote before kickoff and holds the rest to settlement. The caps below are the whole risk budget; the daily stop ends the day automatically.</p>';
+      const meansDeep = '<p>Fair value p* = ' + Math.round((cfg.sharpWeight || 0.8) * 100) + '% books + ' + Math.round((1 - (cfg.sharpWeight || 0.8)) * 100) + '% Kalshi mid. Take when ask + fee + ' + Math.round(cfg.takerMargin * 100) + '¢ ≤ p* (fill-or-cancel, sized by ' + (cfg.kelly === 1 ? 'full' : cfg.kelly === 0.5 ? 'half' : cfg.kelly === 0.1 ? 'tenth' : 'quarter') + ' Kelly on $' + cfg.bankroll + '). Otherwise rest a post-only bid at floor(p* − ' + Math.round(cfg.makerMargin * 100) + '¢ − maker fee). Cancel within ' + cfg.preKickoffSec + 's of kickoff. Caps: $' + cfg.maxPerGame + ' per game, $' + cfg.maxExposure + ' total, stop at −$' + cfg.dailyLoss + ' settled for the day, ' + cfg.maxOpenGames + ' games with positions.</p>';
+      html += P.layer(meansSimple, meansWhy, meansDeep, { label: 'What this means for you' });
       // stats
       html += '<div class="tiles" style="margin-top:12px">' +
         '<div class="tile"><div class="label">Today</div><div class="v ' + (today.realized >= 0 ? 'up' : 'down') + '">' + money(today.realized || 0) + '</div><div class="s">' + (today.bets || 0) + ' orders · stop at ' + U.money(-Math.abs(cfg.dailyLoss)) + '</div></div>' +
@@ -3263,7 +3422,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
       const unmatched = st.games.filter(g => g.status === 'unmatched');
       html += '<div class="section"><h3>Games in view</h3>' + (games.length ? '<div class="tablewrap"><table class="table"><thead><tr><th>Game</th><th class="r">Kickoff</th><th class="r">Sharp</th><th class="r">Kalshi ask</th><th>Plan</th></tr></thead><tbody>' + games.map(g => {
         const plan = (() => { try { return JSON.parse(g.plan || '[]'); } catch (e) { return []; } })();
-        const planTxt = plan.length ? plan.map(p => '<div><span class="muted">' + esc(p.team.split(' ').pop()) + ':</span> ' + esc(p.text) + '</div>') .join('') : (g.note ? esc(g.note) : '—');
+        const planTxt = plan.length ? plan.map(p => '<div><span class="muted">' + esc(p.team.split(' ').pop()) + ':</span> ' + esc(p.text) + (p.pStar !== undefined ? '<details class="layer-d" style="display:inline-block;margin-left:6px"><summary>numbers</summary><div class="layer-body" style="padding-left:0">books ' + pct(p.pSharp) + ' → fair ' + pct(p.pStar) + ' · Kalshi bid ' + U.cents(p.bid) + ' / ask ' + U.cents(p.ask) + ' · take if ask + fee + ' + Math.round(cfg.takerMargin * 100) + '¢ ≤ fair; quote at fair − ' + Math.round(cfg.makerMargin * 100) + '¢ − fee</div></details>' : '') + '</div>').join('') : (g.note ? esc(g.note) : '—');
         return '<tr><td><b>' + esc(g.away) + '</b> at <b>' + esc(g.home) + '</b><div class="faint small"><span class="chip" style="padding:1px 6px">' + esc(g.sport) + '</span> <span class="mono">' + esc(g.event_ticker) + '</span> · ' + esc(g.status) + (g.books ? ' · ' + g.books + ' book' + (g.books > 1 ? 's' : '') : '') + '</div></td><td class="r nowrap">' + (g.commence_ts ? U.countdown(g.commence_ts) : '—') + '</td><td class="r nowrap">' + (g.p_home !== null ? pct(g.p_home) + ' / ' + pct(g.p_away) : '—') + '</td><td class="r nowrap">' + (g.k_home_ask !== null ? U.cents(g.k_home_ask) + ' / ' + U.cents(g.k_away_ask) : '—') + '</td><td class="small">' + planTxt + '</td></tr>';
       }).join('') + '</tbody></table></div><div class="faint small" style="margin-top:6px">Sharp and ask columns read home / away. A plan line names the team and what the engine did or why it held back.</div>' : '<div class="empty">' + (on || last.ts ? 'No matched games in the next ' + cfg.maxHoursAhead + ' hours for the enabled sports.' : 'Run a dry run to see which games the engine would trade and why.') + '</div>') +
         (unmatched.length ? '<details style="margin-top:8px"><summary class="small muted">' + unmatched.length + ' Kalshi game' + (unmatched.length > 1 ? 's' : '') + ' without a matching sportsbook line</summary><div class="small muted" style="margin-top:6px">' + unmatched.map(g => esc(g.away) + ' vs ' + esc(g.home) + ' <span class="mono">' + esc(g.event_ticker) + '</span>').join('<br>') + '</div></details>' : '') + '</div>';

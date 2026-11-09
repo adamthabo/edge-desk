@@ -144,13 +144,13 @@
       const briefHtml = brief ? '<div class="small" style="padding:8px 10px;background:var(--bg-sunk);border-radius:var(--radius)"><b>Claude:</b> ' + esc(brief.take) + (brief.caution ? ' <span class="muted">' + esc(brief.caution) + '</span>' : '') + ' <span class="faint">(' + esc(brief.confidence || '') + ' confidence)</span></div>' : '';
       const kp = P.KIND_PLAIN[o.kind];
       const kindTip = kp ? '<button type="button" class="kind ' + o.kind + ' kindbtn" data-kind-tip="' + o.kind + '" aria-label="What is ' + KINDS[o.kind] + '?">' + KINDS[o.kind] + ' <span aria-hidden="true">?</span></button>' : '<span class="kind ' + o.kind + '">' + KINDS[o.kind] + '</span>';
+      const plainWhy = P.opPlain(o, S.universe.markets).replace(/^<div class="plain"><span class="plain-l">In plain terms<\/span>/, '').replace(/<\/div>$/, '');
+      const layered = P.on() ? P.layer(esc(P.opDo(o)), plainWhy + '<p class="note">' + esc(o.note) + '</p>', '<p>' + esc(o.math) + '</p>') : '<div class="math">' + esc(o.math) + '</div><div class="note">' + esc(o.note) + '</div>';
       return '<div class="card opp" data-op="' + esc(this.opKey(o)) + '">' +
         '<div class="opp-head">' + kindTip + (cat ? '<span class="faint small">' + esc(cat) + '</span>' : '') + (m0 && m0.close ? '<span class="faint small" style="margin-left:auto">' + T('closes', 'closes') + ' ' + U.countdown(m0.close) + '</span>' : '') + '</div>' +
         '<div class="title">' + esc(o.title) + '</div>' +
-        '<div class="headline">' + esc(o.headline) + '</div>' +
-        '<div class="math">' + esc(o.math) + '</div>' + legs +
-        P.opPlain(o, S.universe.markets) +
-        '<div class="note">' + esc(o.note) + '</div>' + briefHtml +
+        '<div class="headline">' + esc(o.headline) + '</div>' + legs +
+        layered + briefHtml +
         '<div class="actions">' + actions + '</div></div>';
     },
     opKey(o) { return o.kind + ':' + (o.sub || '') + ':' + o.tickers.join(','); },
@@ -312,7 +312,7 @@
         '<div class="facts" id="sh-facts"></div>' +
         '<div><div class="row" style="justify-content:space-between;margin-bottom:6px"><span class="label">Price history</span><div class="seg">' + ['1D', '1W', '1M', 'All'].map(r => '<button data-act="range" data-r="' + r + '"' + (S.sheet.range === r ? ' class="on"' : '') + '>' + r + '</button>').join('') + '</div></div><div class="chart-wrap"><canvas id="sh-chart" height="190"></canvas><div class="chart-tip" id="sh-chart-tip"></div></div><div class="faint small" id="sh-chart-note" style="margin-top:4px"></div></div>' +
         '<div><div class="label" style="margin-bottom:6px">' + T('book', 'Order book') + '</div>' + (S.blocked.book ? '<div class="empty">Kalshi\'s order book endpoint asked for authentication, so depth is hidden. Top-of-book bid, ask and size still update from the market record.</div>' : '<div class="chart-wrap"><canvas id="sh-depth" height="120"></canvas><div class="chart-tip" id="sh-depth-tip"></div></div><div class="ladder" id="sh-ladder" style="margin-top:8px"></div>' + (P.on() ? '<div class="faint small" style="margin-top:6px">Left: how many contracts people want to buy at each price (' + T('bid', 'bids') + '). Right: how many are for sale at each price (' + T('ask', 'offers') + '). Bigger bars mean more money waiting there.</div>' : '')) + '</div>' +
-        '<div class="section" style="margin-top:0"><h3>Edge calculator</h3>' + P.calcPlain() + '<div class="calc" id="sh-calc" style="margin-top:8px"></div></div>' +
+        '<div class="section" style="margin-top:0"><h3>Should I bet on this?</h3>' + (P.on() ? '<div class="small muted" style="margin-bottom:6px">Set the chance <i>you</i> believe; the desk tells you whether either side is worth it, how much, and why.</div>' : '') + '<div class="calc" id="sh-calc" style="margin-top:8px"></div></div>' +
         '<div class="section" style="margin-top:0"><h3>Paper ticket</h3>' + P.ticketPlain() + '<div class="ticket" id="sh-ticket" style="margin-top:8px"></div></div>' +
         '<div class="section" style="margin-top:0"><h3>Claude\'s read</h3><div class="ai" id="sh-ai"></div></div>' +
         '<div class="section" style="margin-top:0"><h3>Recent trades</h3><div id="sh-trades"></div></div>' +
@@ -366,6 +366,7 @@
       if (S.sheet.calcQ === null) S.sheet.calcQ = m.mid !== null ? Math.round(m.mid * 100) : 50;
       box.innerHTML = '<div class="slider"><div class="row" style="justify-content:space-between"><span class="small muted">Your probability of YES</span><b id="calc-q-label">' + S.sheet.calcQ + '%</b></div><input type="range" id="calc-q" min="1" max="99" value="' + S.sheet.calcQ + '"></div>' +
         '<div class="row small muted" style="gap:14px"><label class="row" style="gap:6px">Bankroll <input class="inp" id="calc-bank" type="number" min="1" step="50" value="' + esc(S.settings.bankroll) + '" style="width:96px;padding:4px 6px"></label><label class="row" style="gap:6px">Kelly <select class="sel" id="calc-kelly" style="padding:4px 6px"><option value="1"' + (S.settings.kelly === 1 ? ' selected' : '') + '>Full</option><option value="0.5"' + (S.settings.kelly === 0.5 ? ' selected' : '') + '>Half</option><option value="0.25"' + (S.settings.kelly === 0.25 ? ' selected' : '') + '>Quarter</option><option value="0.1"' + (S.settings.kelly === 0.1 ? ' selected' : '') + '>Tenth</option></select></label></div>' +
+        '<div id="calc-decision"></div>' +
         '<div class="evgrid" id="calc-out"></div>' +
         '<div class="faint small">' + T('ev', 'EV') + ' uses the taker price plus Kalshi\'s ' + T('fee', 'fee') + ' for one contract. ' + T('kelly', 'Kelly size') + ' assumes your probability is exactly right, which it is not; fractional Kelly is the usual correction.</div>';
       this.renderCalcOut();
@@ -391,6 +392,7 @@
           (good ? '<div>' + T('kelly', 'Kelly') + ' ' + U.pct(e.kelly, 1) + ' → <b>' + sz.contracts + ' contracts</b> (' + U.money(sz.stake) + ')</div><button class="btn sm ' + side + '" style="margin-top:4px" data-act="ticket" data-t="' + esc(m.ticker) + '" data-side="' + side + '" data-qty="' + sz.contracts + '">Paper ' + sz.contracts + ' ' + side.toUpperCase() + '</button>' : '<div class="faint">No edge at this belief</div>') + '</div>';
       };
       out.innerHTML = box('yes') + box('no');
+      const dec = $('calc-decision'); if (dec) dec.innerHTML = P.decision(m, q, info, S.settings.rounding, bank, kf);
     },
     ticketModeBar() {
       const acct = window.EDAcct;
@@ -659,7 +661,7 @@
     if (act === 'import') { try { const data = JSON.parse($('import-box').value); Persist.apply(data); Persist.save(); UI.toast('Imported'); UI.render(); } catch (e) { UI.toast('That is not a valid export'); } return; }
     if (act === 'copy') { copyText(el.dataset.text); return; }
     if (act === 'airead') { UI.aiRead(!!el.dataset.fresh); return; }
-    if (act === 'guide') { $('guide-body').innerHTML = P.guideHtml(); $('guide').hidden = false; $('guide-body').scrollTop = 0; UI.markGuideSeen(); UI.renderPrimer(); return; }
+    if (act === 'guide') { $('guide-body').innerHTML = P.guideHtml(); $('guide-title').textContent = 'Learn'; $('guide').hidden = false; $('guide-body').scrollTop = 0; UI.markGuideSeen(); UI.renderPrimer(); if (el.dataset.lesson) { const sec = $('lesson-' + el.dataset.lesson); if (sec) { sec.scrollIntoView(); sec.querySelectorAll('details').forEach(d => d.open = true); } } return; }
     if (act === 'guideclose') { $('guide').hidden = true; return; }
     if (act === 'primerdismiss') { UI.markGuideSeen(); UI.renderPrimer(); return; }
     if (act === 'copyread') { const m = S.universe.markets.get(S.sel); if (m) copyText(UI.readPrompt(m, false), 'Prompt copied. Paste it into a Claude chat.'); return; }

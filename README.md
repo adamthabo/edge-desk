@@ -27,6 +27,14 @@ Add three secrets to the Worker (Settings → Variables and Secrets) and the Des
 
 The private key never leaves the Worker: it signs each request there, and the account routes answer only the page served by this Worker, with the password. Orders are sent as price-capped limit orders (fill-or-cancel by default) through Kalshi's V2 order endpoint.
 
+## Trading engine (optional, real money)
+
+Desk → Engine runs a "line anchor" strategy inside the Worker (a Durable Object with its own SQLite journal, woken every minute by a cron trigger): it matches Kalshi game markets to sharp sportsbook lines from the-odds-api.com, devigs them into fair probabilities, takes Kalshi's price when it is off by more than fees plus a margin, otherwise rests bids below fair value, pulls quotes before kickoff, holds to settlement, and journals every bet with the probability it believed (Brier score vs the market).
+
+- Add the secret `ODDS_API_KEY` (the-odds-api.com). Optional `NTFY_TOPIC` for push alerts via ntfy.sh.
+- Limits live in the Engine tab: bankroll, per-game and total exposure, daily loss stop (auto-off + cancel), margins, sports. The Worker's `MAX_ORDER_*` caps still apply to every order.
+- `wrangler.toml` declares the Durable Object binding, its SQLite migration and the cron trigger; deploying once with it is required before the Engine tab works.
+
 ## What the relay does and does not do
 
 It forwards `GET` requests for a short allowlist of public endpoints (`/markets`, `/events`, `/series`, `/markets/trades`, orderbooks, candlesticks, exchange status) to `external-api.kalshi.com`, caches responses for a few seconds and adds CORS headers. It holds no API key and cannot place orders or read an account. Real trading happens on Kalshi.

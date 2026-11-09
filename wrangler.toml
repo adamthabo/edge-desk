@@ -1,6 +1,19 @@
 name = "edge-desk"
 main = "edge-desk.worker.js"
 compatibility_date = "2026-06-01"
+
+# Trading engine state (journal, settings) lives in a SQLite-backed Durable Object; the cron wakes it every minute.
+[[durable_objects.bindings]]
+name = "ENGINE"
+class_name = "EngineDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["EngineDO"]
+
+[triggers]
+crons = ["* * * * *"]
+
 # Optional: lock the relay to copies that know a key, and/or to one origin.
 # [vars]
 # RELAY_KEY = "choose-a-secret"

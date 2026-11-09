@@ -19,6 +19,8 @@ const PAGE = __PAGE__;
 
 __DESK__
 
+__ENGINE__
+
 
 const UPSTREAM = {
   prod: ['https://external-api.kalshi.com/trade-api/v2', 'https://api.elections.kalshi.com/trade-api/v2'],
@@ -98,13 +100,33 @@ async function relay(request, env, path, bases, cors) {
   return new Response(res.body, { status: res.status, headers: headers });
 }
 
+async function engineRoute(request, env, url, cors) {
+  const noStore = Object.assign({ 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }, cors);
+  const json = (obj, status) => new Response(JSON.stringify(obj), { status: status || 200, headers: noStore });
+  if (!env.ENGINE) return json({ error: 'engine storage is not bound; redeploy with the current wrangler.toml' }, 503);
+  if (!isSameOrigin(request, url)) return json({ error: 'engine routes answer only the page served by this Worker' }, 403);
+  const pw = (env.DESK_PASSWORD || '').trim();
+  if (!pw) return json({ error: 'DESK_PASSWORD is not set on the Worker' }, 503);
+  const h = request.headers.get('Authorization') || ''; const m = /^Bearer\s+(.+)$/i.exec(h);
+  if (!m || !(await EdgeDeskAccount._internal.sameSecret(m[1].trim(), pw))) return json({ error: 'wrong desk password' }, 401);
+  const stub = env.ENGINE.get(env.ENGINE.idFromName('main'));
+  const res = await stub.fetch(request);
+  const out = new Response(res.body, res); for (const k in cors) out.headers.set(k, cors[k]); return out;
+}
+
 export default {
+  async scheduled(event, env, ctx) {
+    if (!env.ENGINE) return;
+    const stub = env.ENGINE.get(env.ENGINE.idFromName('main'));
+    ctx.waitUntil(stub.fetch('https://engine/engine/cron'));
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
     const origin = request.headers.get('Origin') || '';
     const cors = corsHeaders(env, origin);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     if (url.pathname === '/desk' || url.pathname.startsWith('/desk/')) return EdgeDeskAccount.deskRoute(request, env || {}, url, UPSTREAM, cors, isSameOrigin);
+    if (url.pathname === '/engine' || url.pathname.startsWith('/engine/')) return engineRoute(request, env || {}, url, cors);
     if (request.method !== 'GET' && request.method !== 'HEAD') return json({ error: 'GET only' }, 405, cors);
 
     let path = url.pathname;
@@ -126,3 +148,5 @@ export default {
   }
 };
 export const __desk = EdgeDeskAccount;
+export { EngineDO };
+export const __engine = EdgeDeskEngine;

@@ -23,7 +23,7 @@ let calls = [];
 let lastInit = null;
 const DESK = { positions: [], orders: [{ order_id: 'o-77', ticker: 'T0', side: 'yes', action: 'buy', yes_price_dollars: '0.3000', remaining_count_fp: '5.00', initial_count_fp: '5.00', status: 'resting', created_time: new Date().toISOString() }], lastOrder: null, cancelled: null };
 const BLOCK = { candles: false, book: false };
-const ENG = { settings: { enabled: false, env: 'prod', bankroll: 500, kelly: 0.25, maxPerGame: 25, maxExposure: 150, dailyLoss: 50, maxOpenGames: 12, takerMargin: 0.02, makerMargin: 0.03, sharpWeight: 0.8, maxHoursAhead: 36, takerEnabled: true, makerEnabled: true, sports: { NFL: true, NBA: true, NHL: true, NCAAF: false, NCAAB: false, MLB: false }, bookmakers: 'pinnacle', ntfyTopic: '' }, lastTick: { ts: Date.now() - 30000, reason: 'alarm', matched: 1, unmatched: 1, taker: 1, maker: 1, cancels: 0, errors: [], exposure: 17.2, odds: { NFL: 'cached 40s ago (12 events)' } }, saved: null, toggled: null, previewed: false };
+const ENG = { settings: { enabled: false, env: 'prod', bankroll: 500, kelly: 0.25, maxPerGame: 25, maxExposure: 150, dailyLoss: 50, maxOpenGames: 12, takerMargin: 0.02, makerMargin: 0.03, sharpWeight: 0.8, maxHoursAhead: 36, takerEnabled: true, makerEnabled: true, sports: { NFL: true, NBA: true, NHL: true, NCAAF: false, NCAAB: false, MLB: false }, bookmakers: 'pinnacle', ntfyTopic: '' }, lastTick: { ts: Date.now() - 30000, reason: 'alarm', matched: 1, unmatched: 1, taker: 1, maker: 1, cancels: 0, errors: [], exposure: 17.2, odds: { NFL: 'cached 40s ago (12 events)' } }, saved: null, toggled: null, previewed: false, brakes: { NBA: { at: Date.now() - 86400000, until: Date.now() + 6 * 86400000, reason: 'closing-line value -0.9¢ over 23 fills in 30 days', n: 23, clv: -0.009 } }, unbraked: null };
 function respond(url) {
   const u = new URL(url);
   calls.push(u.pathname + u.search);
@@ -31,7 +31,8 @@ function respond(url) {
   if (u.pathname.startsWith('/engine/')) {
     const sub = u.pathname.slice(8); const auth = (lastInit && lastInit.headers && lastInit.headers['Authorization']) || '';
     if (auth !== 'Bearer pw123') return { __status: 401, error: 'wrong desk password' };
-    if (sub === 'status') return { settings: ENG.settings, lastTick: ENG.lastTick, stats: { settled: [{ kind: 'taker', n: 4, pnl: 12.5, wins: 3, brier_sum: 0.8, brier_mkt: 0.95, staked: 60 }], open: { n: 1, staked: 8 }, resting: { n: 2 }, days: [{ day: '2026-11-09', realized: 3.2, bets: 5 }], oddsRemaining: 18800 }, oddsKey: true, ntfy: false, alarm: null };
+    if (sub === 'status') return { settings: ENG.settings, lastTick: ENG.lastTick, stats: { settled: [{ kind: 'taker', n: 4, pnl: 12.5, wins: 3, brier_sum: 0.8, brier_mkt: 0.95, staked: 60 }], methods: { n: 12, b_mult: 2.46, b_pow: 2.40 }, open: { n: 1, staked: 8 }, resting: { n: 2 }, days: [{ day: '2026-11-09', realized: 3.2, bets: 5 }], clv: [{ sport: 'NFL', kind: 'taker', n: 12, clv: 0.021, clv_mkt: 0.004, beat: 8 }, { sport: 'NBA', kind: 'maker', n: 6, clv: -0.003, clv_mkt: 0.001, beat: 2 }], oddsRemaining: 18800, oddsUsedToday: 40, oddsBudget: 606, runwayDays: 44, brakes: ENG.brakes, trim: { trim: 1, n: 4 } }, oddsKey: true, kalshiKey: true, ntfy: false, alarm: null, health: { oddsKey: true, kalshiKey: true, ntfy: false, alarm: null, odds: { NFL: { at: Date.now() - 40000, events: 12 } }, subMax: 45 } };
+    if (sub === 'unbrake' && lastInit.method === 'POST') { ENG.unbraked = JSON.parse(lastInit.body).sport; delete ENG.brakes[ENG.unbraked]; return { ok: true, brakes: ENG.brakes }; }
     if (sub === 'games') return { games: [{ id: 'KXNFLGAME-26NOV09NEBUF', sport: 'NFL', event_ticker: 'KXNFLGAME-26NOV09NEBUF', home: 'Buffalo Bills', away: 'New England Patriots', commence_ts: Date.now() + 3600000, p_home: 0.61, p_away: 0.39, books: 3, k_home_ask: 0.63, k_away_ask: 0.35, status: 'active', note: '', plan: JSON.stringify([{ team: 'Buffalo Bills', text: 'resting bid 16 at 0.57 (fair 0.61)' }, { team: 'New England Patriots', text: 'took the ask: 23 at 0.35 (edge 5.5¢)' }]) }, { id: 'X', sport: 'NFL', event_ticker: 'KXNFLGAME-26NOV09XXXYYY', home: 'XXX', away: 'YYY', status: 'unmatched', note: 'no sportsbook line matched these team names', plan: null }] };
     if (sub === 'bets') return { bets: [{ id: 'b1', ts: Date.now() - 60000, ticker: 'KXNFLGAME-26NOV09NEBUF-NE', team: 'New England Patriots', kind: 'taker', count: 23, price: 0.35, fee: 0.37, p_star: 0.42, edge: 0.055, status: 'filled', fill_count: 23, result: null, pnl: null }] };
     if (sub === 'log') return { log: [{ ts: Date.now(), level: 'info', msg: 'Took 23 YES ...' }] };
@@ -196,10 +197,20 @@ const assert = (cond, msg) => { if (!cond) { errors.push('ASSERT: ' + msg); cons
   UI.deskTab = 'engine'; UI.nav('desk'); await sleep(400);
   assert($('desk-engine') && !$('desk-engine').hidden && /Engine off/.test($('desk-engine').textContent), 'engine tab renders status');
   assert(/took the ask: 23 at 0.35/.test($('desk-engine').textContent) && /without a matching sportsbook line/.test($('desk-engine').textContent), 'engine games table shows plans and unmatched games');
-  assert(/Brier score vs market 0.237/.test($('desk-engine').textContent) && /\+\$12\.50/.test($('desk-engine').textContent), 'engine stats tiles computed');
+  assert(/Brier vs market 0.237/.test($('desk-engine').textContent) && /\+\$12\.50/.test($('desk-engine').textContent), 'engine stats tiles computed');
+  assert(/Ready\?/.test($('desk-engine').textContent) && /ODDS_API_KEY is set/.test($('desk-engine').textContent) && /NFL: 12 events/.test($('desk-engine').textContent) && /606 a day/.test($('desk-engine').textContent) && /~44 days/.test($('desk-engine').textContent), 'readiness checklist shows keys, lines and credit runway');
+  const eng = $('desk-engine').textContent;
+  assert(/Closing line/.test(eng) && /\+1\.3¢/.test(eng) && /18 fills/.test(eng) && /beat the close 56%/.test(eng), 'closing-line tile aggregates CLV across sports (' + (eng.match(/[+−]\d\.\d¢/g) || []).slice(0, 2).join(',') + ')');
+  assert(/power 0\.200 vs mult 0\.205/.test(eng), 'calibration tile compares devig methods');
+  assert(/NBA paused by the engine/.test(eng) && window.document.querySelector('[data-act="engunbrake"][data-s="NBA"]'), 'brake banner with resume button');
+  assert(/NBA \(paused\)/.test(eng), 'sport chip marks the paused sport');
+  window.document.querySelector('[data-act="engunbrake"]').click(); await sleep(200);
+  assert(ENG.unbraked === 'NBA' && !/NBA paused by the engine/.test($('desk-engine').textContent), 'resume posts unbrake and clears the banner');
   $('eng-maxPerGame').value = '30'; window.document.querySelector('[data-eng-sport="NHL"]').click();
+  $('eng-devig').value = 'mult'; $('eng-maxOddsAgeMin').value = '12'; $('eng-moveGuard').value = '4';
   window.document.querySelector('[data-act="engsave"]').click(); await sleep(200);
   assert(ENG.saved && ENG.saved.maxPerGame === 30 && ENG.saved.sports.NHL === false && Math.abs(ENG.saved.takerMargin - 0.02) < 1e-9, 'engine settings saved with converted units');
+  assert(ENG.saved.devig === 'mult' && ENG.saved.maxOddsAgeMin === 12 && Math.abs(ENG.saved.moveGuard - 0.04) < 1e-9 && ENG.saved.timezone === 'America/New_York' && ENG.saved.digestHour === 9, 'v2 settings saved (devig, line age, move guard, digest)');
   window.document.querySelector('[data-act="engstart"]').click(); await sleep(50);
   assert(/Real money/.test($('eng-confirm').textContent) && window.document.querySelector('[data-act="engstart2"]'), 'engine start asks for confirmation');
   window.document.querySelector('[data-act="engstart2"]').click(); await sleep(300);

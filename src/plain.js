@@ -6,6 +6,8 @@
 
   // Glossary: term key -> {t: label, d: definition}. Written for someone who has never traded anything.
   const GLOSSARY = {
+    clv: { t: 'closing-line value', d: 'How much better than the final pre-game fair price you bought. Bought at 35¢ with a fair close of 40¢ is +5¢ of CLV. Positive on average over a few dozen bets is the earliest reliable sign of real edge; results take hundreds of bets to say the same thing.' },
+    confidence: { t: 'confidence', d: 'How much the engine trusts a line right now: full size needs a sharp book, two or more books in agreement, and a fresh update. Disagreement or age trims the size; a lot of either blocks the game until the lines refresh.' },
     contract: { t: 'contract', d: 'One yes-or-no bet on a real-world event. If you hold YES and the event happens, Kalshi pays you $1 per contract. If it does not happen, the contract is worth $0. NO works the other way around.' },
     price: { t: 'price', d: 'What one contract costs right now, from 1¢ to 99¢. It doubles as the crowd\'s estimate of the odds: a YES price of 42¢ means traders collectively think there is about a 42% chance the event happens.' },
     yes: { t: 'YES', d: 'The side that pays $1 if the event happens. Buying YES at 42¢ risks 42¢ to make 58¢.' },

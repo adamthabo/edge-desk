@@ -29,9 +29,10 @@ test('engine lifecycle', async (t) => {
     assert.equal(s.note, 'engine off'); assert.equal(w.requests.length, 0);
   });
   await t.test('toggle refuses without keys, accepts with them', async () => {
-    const noKeys = new EngineDO(fakeState(), env({ KALSHI_KEY_ID: '', KALSHI_PRIVATE_KEY: '' }));
+    const noKeys = new EngineDO(fakeState(), env({ KALSHI_KEY_ID: '', KALSHI_PRIVATE_KEY: '' })); noKeys.saveSettings({ shadow: false });
     const r = await post(noKeys, 'toggle', { enabled: true });
     assert.match(r.error || '', /Kalshi API key/);
+    d.saveSettings({ shadow: false });
     const ok = await post(d, 'toggle', { enabled: true });
     assert.equal(ok.settings.enabled, true); assert.ok(state.alarm() !== null, 'alarm scheduled');
   });
@@ -96,7 +97,7 @@ test('engine lifecycle', async (t) => {
   await t.test('credit scheduler: few credits left → cadence stretched to fit the month; far games fetch nothing; started games stop fetching', async () => {
     const d2 = new EngineDO(fakeState(), env()); const w2 = world(ck.get()); installFetch(w2); setLine(w2, 1.75, 2.25, 1.72, 2.28);
     w2.oddsRemaining = '100'; // → 4 fetches a day → one every 6 hours for a single sport
-    d2.saveSettings({ enabled: true });
+    d2.saveSettings({ enabled: true, shadow: false });
     let s = await d2.tick('alarm'); assert.equal(w2.oddsCalls, 1); assert.equal(s.oddsBudget.daily, 4);
     ck.add(6 * MIN); freshen(w2, ck.get()); s = await d2.tick('alarm');
     assert.equal(w2.oddsCalls, 1, 'no refetch six minutes later'); assert.equal(s.oddsCadenceSec, 21600); assert.match(s.odds.NFL, /cached/);
@@ -109,16 +110,16 @@ test('engine lifecycle', async (t) => {
     ck.set(w2.kick + 10 * MIN); freshen(w2, ck.get()); s = await d2.tick('alarm');
     assert.equal(w2.oddsCalls, 2); assert.match(s.odds.NFL, /under way; lines not needed/);
     const wFar = world(ck.get(), 5 * 24 * 3600000); installFetch(wFar);
-    const d3 = new EngineDO(fakeState(), env()); d3.saveSettings({ enabled: true });
+    const d3 = new EngineDO(fakeState(), env()); d3.saveSettings({ enabled: true, shadow: false });
     const s3 = await d3.tick('alarm');
     assert.match(s3.odds.NFL, /no games inside the horizon/); assert.equal(wFar.oddsCalls, 0, 'no credit spent on a slate five days out');
-    assert.ok(rows(d3, "SELECT * FROM games WHERE note LIKE '%outside the trading horizon%'").length >= 1);
+    assert.equal(rows(d3, 'SELECT * FROM games').length, 0, 'games outside the window are not even priced');
     installFetch(w);
   });
   await t.test('closing line: last tick before kickoff records the close and scores fills; late fills scored later', async () => {
     freshen(w, ck.get());
     const d4 = new EngineDO(fakeState(), env()); const w4 = world(ck.get()); installFetch(w4); setLine(w4, 1.75, 2.25, 1.72, 2.28);
-    d4.saveSettings({ enabled: true });
+    d4.saveSettings({ enabled: true, shadow: false });
     let s = await d4.tick('alarm'); assert.equal(s.taker, 1);
     // a resting BUF quote gets filled on the exchange before kickoff
     const bufQuote = w4.resting.find(o => o.ticker === w4.EV1 + '-BUF'); assert.ok(bufQuote);
@@ -147,7 +148,7 @@ test('engine lifecycle', async (t) => {
   });
   await t.test('brakes: negative closing-line value over enough fills pauses the sport; the user can resume', async () => {
     const d5 = new EngineDO(fakeState(), env()); const w5 = world(ck.get()); installFetch(w5); setLine(w5, 1.75, 2.25, 1.72, 2.28);
-    d5.saveSettings({ enabled: true, brakeMinBets: 1 });
+    d5.saveSettings({ enabled: true, shadow: false, brakeMinBets: 1 });
     await d5.tick('alarm');
     // pretend the NE buy was a bad one: price well above the close
     d5.sql.exec("UPDATE bets SET price = 0.55 WHERE kind='taker'");
@@ -169,7 +170,7 @@ test('engine lifecycle', async (t) => {
   });
   await t.test('exits: a reduce-only ask rests above fair on held contracts; when the bid clears fair + margin the position is sold and the books net out', async () => {
     const d9 = new EngineDO(fakeState(), env()); const w10 = world(ck.get()); installFetch(w10); setLine(w10, 1.75, 2.25, 1.72, 2.28); freshen(w10, ck.get());
-    d9.saveSettings({ enabled: true });
+    d9.saveSettings({ enabled: true, shadow: false });
     let s = await d9.tick('alarm'); assert.equal(s.taker, 1); assert.ok(!w10.resting.some(o => o.action === 'sell'), 'nothing to sell on the tick that buys');
     const N = rows(d9, "SELECT fill_count FROM bets WHERE kind='taker'")[0].fill_count; assert.ok(N >= 20, 'bought ' + N);
     ck.add(MIN); freshen(w10, ck.get()); s = await d9.tick('alarm');
@@ -198,30 +199,134 @@ test('engine lifecycle', async (t) => {
   });
   await t.test('request budget: a tiny budget stops the tick early and says so', async () => {
     const d6 = new EngineDO(fakeState(), env({ SUBREQ_BUDGET: '7' })); const w7 = world(ck.get()); installFetch(w7); setLine(w7, 1.75, 2.25, 1.72, 2.28);
-    d6.saveSettings({ enabled: true }); freshen(w7, ck.get());
+    d6.saveSettings({ enabled: true, shadow: false }); freshen(w7, ck.get());
     const s = await d6.tick('alarm');
     assert.ok(s.notes.some(n => /request budget/.test(n)), 'budget note: ' + JSON.stringify(s.notes)); assert.ok(s.subrequests <= 7);
     installFetch(w);
   });
-  await t.test('dry run without Kalshi keys evaluates the slate and touches no account route', async () => {
+  await t.test('dry run without Kalshi keys: every decision, worded as what it would do; nothing sent, journaled or changed', async () => {
     const d7 = new EngineDO(fakeState(), env({ KALSHI_KEY_ID: '', KALSHI_PRIVATE_KEY: '' })); const w8 = world(ck.get()); installFetch(w8); setLine(w8, 1.75, 2.25, 1.72, 2.28); freshen(w8, ck.get());
+    d7.saveSettings({ shadow: false });
     const r = await post(d7, 'preview', {});
     assert.ok(r.ok, JSON.stringify(r)); const s = r.summary;
-    assert.deepEqual(s.errors, []); assert.equal(s.matched, 2); assert.ok(s.notes.some(n => /without Kalshi keys/.test(n)));
+    assert.equal(s.dry, true); assert.deepEqual(s.errors, []); assert.equal(s.matched, 2); assert.ok(s.notes.some(n => /without Kalshi keys/.test(n)));
     assert.ok(!w8.requests.some(q => q.path.includes('/portfolio/')), 'no account calls');
-    assert.equal(s.taker + s.maker, 0, 'a dry run places nothing');
-    const g = game(d7, w8.EV1); const plan = JSON.parse(g.plan); assert.ok(plan.length === 2 && plan.every(p => p.pStar > 0), 'plan written for both teams');
-    assert.equal(d7.settings().enabled, false, 'engine left off');
+    assert.equal(w8.orders.length, 0, 'no orders'); assert.equal(rows(d7, 'SELECT COUNT(*) AS n FROM bets')[0].n, 0, 'nothing journaled');
+    assert.equal(s.taker, 1, 'counts what it would take');
+    const plan = JSON.parse(game(d7, w8.EV1).plan).map(p => p.text);
+    assert.ok(plan.some(t => /^would take the ask: \d+ at 0\.35/.test(t)) && plan.some(t => /^would place bid \d+ at/.test(t)), 'plan in the conditional: ' + JSON.stringify(plan));
+    const cfg = d7.settings(); assert.equal(cfg.enabled, false, 'engine left off'); assert.equal(cfg.takerEnabled, true); assert.equal(cfg.makerEnabled, true);
+    installFetch(w);
+  });
+  await t.test('dry run with a real account: says it would sell into an overshooting bid, but sends and cancels nothing', async () => {
+    const dD = new EngineDO(fakeState(), env()); const wD = world(ck.get()); installFetch(wD); setLine(wD, 1.75, 2.25, 1.72, 2.28); freshen(wD, ck.get());
+    dD.saveSettings({ enabled: true, shadow: false });
+    await dD.tick('alarm'); ck.add(MIN); freshen(wD, ck.get()); await dD.tick('alarm');
+    assert.ok(wD.resting.some(o => o.action === 'sell'), 'a real ask is resting on the held contracts');
+    dD.saveSettings({ enabled: false });
+    const restingBefore = JSON.stringify(wD.resting), ordersBefore = wD.orders.length, betsBefore = rows(dD, 'SELECT COUNT(*) AS n FROM bets')[0].n, reqStart = wD.requests.length;
+    ck.add(MIN); freshen(wD, ck.get()); wD.quote(wD.EV1 + '-NE', 0.50, 0.52); dD.kv('odds_force_NFL', true);
+    const s = (await post(dD, 'preview', {})).summary;
+    assert.equal(s.dry, true); assert.deepEqual(s.errors, []);
+    assert.ok(wD.requests.slice(reqStart).every(q => q.method === 'GET'), 'only reads');
+    assert.equal(wD.orders.length, ordersBefore, 'no order sent'); assert.equal(JSON.stringify(wD.resting), restingBefore, 'no order cancelled');
+    assert.equal(rows(dD, 'SELECT COUNT(*) AS n FROM bets')[0].n, betsBefore, 'nothing journaled');
+    const plan = JSON.parse(game(dD, wD.EV1).plan).map(p => p.text); assert.ok(plan.some(t => /^would sell \d+ at 0\.50/.test(t)), JSON.stringify(plan));
+    assert.equal(dD.settings().enabled, false);
+    installFetch(w);
+  });
+  await t.test('taking prices off: no immediate sells either, the position is offered with a resting ask instead', async () => {
+    const dT = new EngineDO(fakeState(), env()); const wT = world(ck.get()); installFetch(wT); setLine(wT, 1.75, 2.25, 1.72, 2.28); freshen(wT, ck.get());
+    dT.saveSettings({ enabled: true, shadow: false });
+    await dT.tick('alarm'); dT.saveSettings({ takerEnabled: false });
+    ck.add(MIN); freshen(wT, ck.get()); wT.quote(wT.EV1 + '-NE', 0.50, 0.52); dT.kv('odds_force_NFL', true);
+    const s = await dT.tick('alarm');
+    assert.equal(s.exits || 0, 0); assert.ok(!wT.orders.some(o => o.side === 'ask' && o.time_in_force === 'immediate_or_cancel'), 'no fill-or-cancel sell');
+    const ask = wT.resting.find(o => o.ticker === wT.EV1 + '-NE' && o.action === 'sell'); assert.ok(ask && Number(ask.yes_price_dollars) >= 0.51, 'resting ask above the bid (' + (ask && ask.yes_price_dollars) + ')');
+    installFetch(w);
+  });
+  await t.test('order cap: at most N new live orders a minute; the rest wait, and the plan says so', async () => {
+    const dC = new EngineDO(fakeState(), env()); const wC = world(ck.get()); installFetch(wC); setLine(wC, 1.75, 2.25, 1.72, 2.28); freshen(wC, ck.get());
+    dC.saveSettings({ enabled: true, shadow: false, maxNewOrders: 2 });
+    let s = await dC.tick('alarm');
+    assert.equal(wC.orders.length, 2, 'two orders sent'); assert.ok(s.notes.some(n => /left for next minute \(at most 2 a minute\)/.test(n)), JSON.stringify(s.notes));
+    const plans = rows(dC, 'SELECT plan FROM games WHERE plan IS NOT NULL').flatMap(r => JSON.parse(r.plan)).map(p => p.text);
+    assert.ok(plans.some(t => /waiting a minute: at most 2 new orders a minute/.test(t)), JSON.stringify(plans));
+    ck.add(MIN); freshen(wC, ck.get()); s = await dC.tick('alarm');
+    assert.equal(wC.orders.length, 4, 'two more the next minute');
+    installFetch(w);
+  });
+  await t.test('one tick at a time: an overlapping tick is turned away and the lock is released after', async () => {
+    const dM = new EngineDO(fakeState(), env()); const wM = world(ck.get()); installFetch(wM); setLine(wM, 1.75, 2.25, 1.72, 2.28); freshen(wM, ck.get());
+    dM.saveSettings({ enabled: true, shadow: false });
+    const [a, b] = await Promise.all([dM.tick('alarm'), dM.tick('manual')]);
+    assert.ok(!a.busy && b.busy, 'second tick refused'); assert.equal(wM.orders.filter(o => o.time_in_force === 'immediate_or_cancel').length, 1, 'the cheap dog was bought once');
+    ck.add(MIN); freshen(wM, ck.get()); const c = await dM.tick('manual'); assert.ok(!c.busy, 'lock released');
+    installFetch(w);
+  });
+  await t.test('watchdog: one alert after 5 failing ticks; a live engine stops itself after 30', async () => {
+    const dW = new EngineDO(fakeState(), env()); const wW = world(ck.get()); installFetch(wW); setLine(wW, 1.75, 2.25, 1.72, 2.28); freshen(wW, ck.get());
+    dW.saveSettings({ enabled: true, shadow: false, ntfyTopic: 'adam-test', digestHour: 23 }); wW.balanceStatus = 500;
+    for (let i = 0; i < 5; i++) { const s = await dW.tick('alarm'); assert.ok(s.errors.length); ck.add(MIN); }
+    assert.equal(wW.ntfy.filter(n => /ticks failing/.test(n.title)).length, 1, 'one alert'); assert.equal(dW.settings().enabled, true, 'still running');
+    for (let i = 5; i < 29; i++) { await dW.tick('alarm'); ck.add(MIN); }
+    assert.equal(dW.settings().enabled, true, 'still running after 29');
+    const s = await dW.tick('alarm');
+    assert.equal(dW.settings().enabled, false, 'stopped at 30'); assert.ok(s.notes.some(n => /watchdog stopped/.test(n)));
+    assert.equal(wW.ntfy.filter(n => /ticks failing/.test(n.title)).length, 1, 'no repeat alerts'); assert.ok(wW.ntfy.some(n => /engine stopped/.test(n.title)));
+    installFetch(w);
+  });
+  await t.test('pricing: the full game list every 10 minutes, in between only in-window games by ticker; an API that ignores the filter falls back', async () => {
+    const dP = new EngineDO(fakeState(), env()); const wP = world(ck.get()); installFetch(wP); setLine(wP, 1.75, 2.25, 1.72, 2.28); freshen(wP, ck.get());
+    dP.saveSettings({ enabled: true, shadow: false });
+    const series = () => wP.requests.filter(q => q.path === '/trade-api/v2/markets' && q.query.series_ticker === 'KXNFLGAME').length;
+    const byTicker = () => wP.requests.filter(q => q.path === '/trade-api/v2/markets' && q.query.tickers).length;
+    await dP.tick('alarm'); assert.equal(series(), 1); assert.equal(byTicker(), 0);
+    ck.add(MIN); freshen(wP, ck.get()); let s = await dP.tick('alarm');
+    assert.equal(series(), 1, 'list cached'); assert.equal(byTicker(), 1, 're-priced by ticker'); assert.equal(s.matched, 2);
+    assert.equal(wP.requests.filter(q => q.query.tickers).pop().query.tickers.split(',').length, 6, 'all six legs of the three in-window games');
+    ck.add(10 * MIN); freshen(wP, ck.get()); await dP.tick('alarm'); assert.equal(series(), 2, 'list refreshed after 10 minutes');
+    wP.tickersMode = 'other'; ck.add(MIN); freshen(wP, ck.get()); s = await dP.tick('alarm');
+    assert.equal(series(), 3, 'fell back to the full list'); assert.ok(dP.kv('tickers_unsupported'), 'remembers the filter is ignored'); assert.equal(s.matched, 2, 'every game still priced');
+    ck.add(MIN); freshen(wP, ck.get()); s = await dP.tick('alarm'); assert.equal(byTicker(), 2, 'stops trying a filter the API ignores'); assert.equal(series(), 4); assert.equal(s.matched, 2);
     installFetch(w);
   });
   await t.test('daily digest goes out once a day after the digest hour when a topic is set', async () => {
     const d8 = new EngineDO(fakeState(), env()); const w9 = world(ck.get()); installFetch(w9); setLine(w9, 1.75, 2.25, 1.72, 2.28); freshen(w9, ck.get());
-    d8.saveSettings({ enabled: true, ntfyTopic: 'adam-test', digestHour: 0 });
+    d8.saveSettings({ enabled: true, shadow: false, ntfyTopic: 'adam-test', digestHour: 0 });
     await d8.tick('alarm');
     const digests = w9.ntfy.filter(n => /digest/.test(n.title));
     assert.equal(digests.length, 1, 'one digest'); assert.match(digests[0].body, /Open:/); assert.equal(digests[0].topic, 'adam-test');
     ck.add(MIN); freshen(w9, ck.get()); await d8.tick('alarm');
     assert.equal(w9.ntfy.filter(n => /digest/.test(n.title)).length, 1, 'not repeated the same day');
+    installFetch(w);
+  });
+  await t.test('shadow mode: the whole engine runs on paper, quotes fill only when traded through, and the scorecard is kept apart from live', async () => {
+    const dS = new EngineDO(fakeState(), env({ KALSHI_KEY_ID: '', KALSHI_PRIVATE_KEY: '' })); const wS = world(ck.get()); installFetch(wS); setLine(wS, 1.75, 2.25, 1.72, 2.28); freshen(wS, ck.get());
+    assert.equal(dS.settings().shadow, true, 'shadow is the default');
+    const on = await post(dS, 'toggle', { enabled: true }); assert.equal(on.settings.enabled, true, 'starts without Kalshi keys in shadow');
+    let s = await dS.tick('alarm'); assert.equal(s.mode, 'shadow'); assert.deepEqual(s.errors, []); assert.equal(s.taker, 1); assert.ok(s.maker >= 2);
+    assert.ok(!wS.requests.some(q => q.path.includes('/portfolio/')), 'nothing touches the account'); assert.equal(wS.orders.length, 0, 'no orders reach the exchange');
+    const taker = rows(dS, "SELECT * FROM bets WHERE kind='taker'")[0]; assert.equal(taker.mode, 'shadow'); assert.equal(taker.status, 'filled'); assert.ok(taker.order_id.startsWith('shadow-'));
+    const buf = rows(dS, "SELECT * FROM bets WHERE ticker=? AND action='buy'", wS.EV1 + '-BUF')[0]; assert.equal(buf.status, 'resting');
+    ck.add(MIN); freshen(wS, ck.get()); s = await dS.tick('alarm');
+    assert.equal(rows(dS, 'SELECT status FROM bets WHERE id=?', buf.id)[0].status, 'resting', 'untouched while the market stays above the bid');
+    const askRow = rows(dS, "SELECT * FROM bets WHERE action='sell'")[0]; assert.ok(askRow && askRow.status === 'resting', 'paper ask rests on the held NE contracts');
+    assert.ok(s.cash < 500, 'paper cash reflects the paper position (' + s.cash + ')');
+    wS.quote(wS.EV1 + '-BUF', buf.price - 0.02, buf.price); // the ask trades down to our bid
+    ck.add(MIN); freshen(wS, ck.get()); s = await dS.tick('alarm');
+    assert.equal(rows(dS, 'SELECT status FROM bets WHERE id=?', buf.id)[0].status, 'filled', 'bid filled when traded through (even though the move guard then pulls the rest)');
+    assert.equal(dS.shadowPositions()[wS.EV1 + '-BUF'].qty, buf.count);
+    const st = await get(dS, 'status'); assert.equal(st.mode, 'shadow'); assert.equal(st.stats.mode, 'shadow'); assert.ok(st.stats.open.n >= 2);
+    // settlement on paper
+    ck.set(wS.kick + 3 * 3600000); wS.results[wS.EV1 + '-NE'] = 'no'; wS.results[wS.EV1 + '-BUF'] = 'yes'; freshen(wS, ck.get()); s = await dS.tick('alarm');
+    const settled = rows(dS, "SELECT * FROM bets WHERE status='settled' AND mode='shadow'"); assert.ok(settled.length >= 2, 'paper bets settle (' + settled.length + ')');
+    const day = rows(dS, "SELECT * FROM daily WHERE day LIKE '%#s'"); assert.ok(day.length >= 1 && day.some(d => d.realized !== 0), 'paper P&L booked on the shadow day row');
+    // switching to live stops the engine and clears paper quotes; the live scorecard starts clean
+    const sw = await post(dS, 'settings', { shadow: false }); assert.equal(sw.switched, true); assert.equal(sw.settings.enabled, false);
+    assert.equal(rows(dS, "SELECT COUNT(*) AS n FROM bets WHERE mode='shadow' AND status='resting'")[0].n, 0, 'paper quotes cancelled');
+    const stLive = await get(dS, 'status'); assert.equal(stLive.stats.mode, 'live'); assert.equal(stLive.stats.open.n, 0); assert.equal(stLive.stats.settled.length, 0);
+    const noKeys = await post(dS, 'toggle', { enabled: true }); assert.match(noKeys.error || '', /Kalshi API key/, 'live needs keys');
     installFetch(w);
   });
   await t.test('status carries health for the UI', async () => {

@@ -31,14 +31,14 @@ function respond(url) {
   if (u.pathname.startsWith('/engine/')) {
     const sub = u.pathname.slice(8); const auth = (lastInit && lastInit.headers && lastInit.headers['Authorization']) || '';
     if (auth !== 'Bearer pw123') return { __status: 401, error: 'wrong desk password' };
-    if (sub === 'status') return { settings: ENG.settings, lastTick: ENG.lastTick, stats: { settled: [{ kind: 'taker', n: 4, pnl: 12.5, wins: 3, brier_sum: 0.8, brier_mkt: 0.95, staked: 60 }], methods: { n: 12, b_mult: 2.46, b_pow: 2.40 }, open: { n: 1, staked: 8 }, resting: { n: 2 }, days: [{ day: '2026-11-09', realized: 3.2, bets: 5 }], clv: [{ sport: 'NFL', kind: 'taker', n: 12, clv: 0.021, clv_mkt: 0.004, beat: 8 }, { sport: 'NBA', kind: 'maker', n: 6, clv: -0.003, clv_mkt: 0.001, beat: 2 }], oddsRemaining: 18800, oddsUsedToday: 40, oddsBudget: 606, runwayDays: 44, brakes: ENG.brakes, trim: { trim: 1, n: 4 } }, oddsKey: true, kalshiKey: true, ntfy: false, alarm: null, health: { oddsKey: true, kalshiKey: true, ntfy: false, alarm: null, odds: { NFL: { at: Date.now() - 40000, events: 12 } }, subMax: 45 } };
+    if (sub === 'status') return { settings: ENG.settings, lastTick: ENG.lastTick, stats: { settled: [{ kind: 'taker', n: 4, pnl: 12.5, wins: 3, brier_sum: 0.8, brier_mkt: 0.95, staked: 60 }], methods: { n: 12, b_mult: 2.46, b_pow: 2.40 }, open: { n: 1, staked: 8 }, resting: { n: 2 }, days: [{ day: '2026-11-09', realized: 3.2, bets: 5 }], clv: [{ sport: 'NFL', kind: 'taker', n: 12, clv: 0.021, clv_mkt: 0.004, beat: 8 }, { sport: 'NBA', kind: 'maker', n: 6, clv: -0.003, clv_mkt: 0.001, beat: 2 }], oddsRemaining: 18800, oddsUsedToday: 40, oddsBudget: 606, runwayDays: 44, brakes: ENG.brakes, trim: { trim: 1, n: 4 } }, oddsKey: true, kalshiKey: true, ntfy: false, alarm: null, health: { oddsKey: true, kalshiKey: true, ntfy: false, alarm: null, odds: { NFL: { at: Date.now() - 40000, events: 12 } }, subMax: 45, errStreak: ENG.errStreak || null } };
     if (sub === 'unbrake' && lastInit.method === 'POST') { ENG.unbraked = JSON.parse(lastInit.body).sport; delete ENG.brakes[ENG.unbraked]; return { ok: true, brakes: ENG.brakes }; }
     if (sub === 'games') return { games: [{ id: 'KXNFLGAME-26NOV09NEBUF', sport: 'NFL', event_ticker: 'KXNFLGAME-26NOV09NEBUF', home: 'Buffalo Bills', away: 'New England Patriots', commence_ts: Date.now() + 3600000, p_home: 0.61, p_away: 0.39, books: 3, k_home_ask: 0.63, k_away_ask: 0.35, status: 'active', note: '', plan: JSON.stringify([{ team: 'Buffalo Bills', text: 'resting bid 16 at 0.57 (fair 0.61)' }, { team: 'New England Patriots', text: 'took the ask: 23 at 0.35 (edge 5.5¢)' }]) }, { id: 'X', sport: 'NFL', event_ticker: 'KXNFLGAME-26NOV09XXXYYY', home: 'XXX', away: 'YYY', status: 'unmatched', note: 'no sportsbook line matched these team names', plan: null }] };
     if (sub === 'bets') return { bets: [{ id: 'b1', ts: Date.now() - 60000, ticker: 'KXNFLGAME-26NOV09NEBUF-NE', team: 'New England Patriots', kind: 'taker', count: 23, price: 0.35, fee: 0.37, p_star: 0.42, edge: 0.055, status: 'filled', fill_count: 23, result: null, pnl: null }] };
     if (sub === 'log') return { log: [{ ts: Date.now(), level: 'info', msg: 'Took 23 YES ...' }] };
     if (sub === 'settings' && lastInit.method === 'POST') { ENG.saved = JSON.parse(lastInit.body); Object.assign(ENG.settings, ENG.saved); return { ok: true, settings: ENG.settings }; }
     if (sub === 'toggle' && lastInit.method === 'POST') { ENG.toggled = JSON.parse(lastInit.body); ENG.settings.enabled = !!ENG.toggled.enabled; return { ok: true, settings: ENG.settings }; }
-    if (sub === 'preview' && lastInit.method === 'POST') { ENG.previewed = true; return { ok: true, summary: {} }; }
+    if (sub === 'preview' && lastInit.method === 'POST') { ENG.previewed = true; ENG.lastTick = { ts: Date.now(), reason: 'preview', dry: true, matched: 2, unmatched: 0, taker: 1, maker: 3, cancels: 0, errors: [], notes: [] }; return { ok: true, summary: ENG.lastTick }; }
     return { __status: 404, error: 'nope' };
   }
   if (u.pathname.startsWith('/desk/')) {
@@ -197,6 +197,9 @@ const assert = (cond, msg) => { if (!cond) { errors.push('ASSERT: ' + msg); cons
   UI.deskTab = 'engine'; UI.nav('desk'); await sleep(400);
   assert($('desk-engine') && !$('desk-engine').hidden && /Engine off/.test($('desk-engine').textContent), 'engine tab renders status');
   assert(/took the ask: 23 at 0.35/.test($('desk-engine').textContent) && /without a matching sportsbook line/.test($('desk-engine').textContent), 'engine games table shows plans and unmatched games');
+  { const t = $('desk-engine').textContent; assert(/My call/.test(t) && /Let it run/.test(t) && /18 of 30 bets scored/.test(t) && /\+1\.3¢ against the closing line after fees/.test(t), 'engine verdict: let it run, with the count and the net closing-line value'); assert(/How it works/.test(t), 'how-it-works layer'); }
+  window.document.querySelector('[data-act="engpreview"]').click(); await sleep(400);
+  assert(ENG.previewed && /dry run/.test($('desk-engine').textContent) && /would take 1 · would quote 3/.test($('desk-engine').textContent), 'dry run shows what it would do');
   assert(/Brier vs market 0.237/.test($('desk-engine').textContent) && /\+\$12\.50/.test($('desk-engine').textContent), 'engine stats tiles computed');
   assert(/Ready\?/.test($('desk-engine').textContent) && /ODDS_API_KEY is set/.test($('desk-engine').textContent) && /NFL: 12 events/.test($('desk-engine').textContent) && /606 a day/.test($('desk-engine').textContent) && /~44 days/.test($('desk-engine').textContent), 'readiness checklist shows keys, lines and credit runway');
   const eng = $('desk-engine').textContent;
@@ -217,6 +220,22 @@ const assert = (cond, msg) => { if (!cond) { errors.push('ASSERT: ' + msg); cons
   assert(ENG.toggled && ENG.toggled.enabled === true && /Engine running/.test($('desk-engine').textContent), 'engine started after confirmation');
   window.document.querySelector('[data-act="engstop"]').click(); await sleep(300);
   assert(ENG.toggled && ENG.toggled.enabled === false && ENG.toggled.flatten === true && /Engine off/.test($('desk-engine').textContent), 'engine stop cancels quotes and shows off');
+  // shadow mode: start without the real-money confirmation; the mode select switches modes through settings
+  ENG.settings.shadow = true; ENG.toggled = null; await window.EDEngine.refresh(true); await sleep(100);
+  assert(/Shadow mode/.test($('desk-engine').textContent) && /Start shadow run/.test($('desk-engine').textContent) && /paper only/.test($('desk-engine').textContent), 'shadow mode shown with its own start button');
+  assert(/Keep it on paper/.test($('desk-engine').textContent) && /18 of 30 bets scored so far/.test($('desk-engine').textContent), 'shadow verdict: keep it on paper until 30 bets are scored');
+  window.document.querySelector('[data-act="engstart"]').click(); await sleep(300);
+  assert(ENG.toggled && ENG.toggled.enabled === true && /running on paper/.test($('desk-engine').textContent) && !/Real money/.test($('eng-confirm') ? $('eng-confirm').textContent : ''), 'shadow run starts directly');
+  window.document.querySelector('[data-act="engstop"]').click(); await sleep(300);
+  assert(ENG.toggled.enabled === false, 'shadow run stops');
+  const modeSel = window.document.querySelector('[data-eng-mode]'); modeSel.value = 'live'; modeSel.dispatchEvent(new window.Event('change', { bubbles: true })); await sleep(300);
+  assert(ENG.saved && ENG.saved.shadow === false && /Live mode/.test($('desk-engine').textContent), 'mode select posts the switch and the tab shows live');
+  ENG.settings.shadow = false;
+  // a stalled engine and a failure streak are both called out
+  ENG.settings.enabled = true; ENG.lastTick = { ts: Date.now() - 10 * 60000, reason: 'alarm', matched: 1, unmatched: 0, taker: 0, maker: 0, cancels: 0, errors: [], notes: [] }; ENG.errStreak = { n: 4, last: 'Kalshi 500 /portfolio/balance: down' };
+  await window.EDEngine.refresh(true); await sleep(100);
+  { const t = $('desk-engine').textContent; assert(/No tick has finished for 10 minutes/.test(t) && /exceeded CPU/.test(t) && /The last 4 ticks failed/.test(t) && /stops itself after 30 failures/.test(t), 'stall and failure banners'); }
+  ENG.settings.enabled = false; ENG.errStreak = null;
   await App.Engine.openMarket(tk); await sleep(200);
   // lock
   window.document.querySelector('[data-act="tmode"][data-s="paper"]').click(); await sleep(20);

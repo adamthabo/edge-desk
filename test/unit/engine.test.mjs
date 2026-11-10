@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Eng } from './_load.mjs';
 
-const { devig2, devigPower, consensus, confidence, oddsBudget, feeFor, kellyCount, teamMatch, parseEventDate, hourIn, dayIn, ENGINE_DEFAULTS } = Eng;
+const { devig2, devigPower, consensus, confidence, oddsBudget, feeFor, kellyCount, teamMatch, legSide, TEAM_ALIASES, parseEventDate, hourIn, dayIn, ENGINE_DEFAULTS } = Eng;
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
 
 test('devig: multiplicative and power both sum to one; power favours the favourite', () => {
@@ -92,6 +92,28 @@ test('fees and sizing: taker 7% rounded up per contract; confidence scales the b
   const half = kellyCount(0.40, 0.35, 0.0159, 250, 0.25, 25);
   assert.ok(full >= 1 && half <= Math.ceil(full / 2), 'half the bankroll → about half the contracts (' + full + ' vs ' + half + ')');
   assert.equal(kellyCount(0.30, 0.35, 0.01, 500, 0.25, 25), 0, 'no edge → nothing');
+});
+
+test('team matching: nicknames, city codes and city-only labels; same-city rivals never cross', () => {
+  const yes = [['SF 49ers', 'San Francisco 49ers'], ['NE Patriots', 'New England Patriots'], ['LA Rams', 'Los Angeles Rams'], ['BUF Bills', 'Buffalo Bills'], ['GSW Warriors', 'Golden State Warriors'],
+    ['New England', 'New England Patriots'], ['Patriots', 'New England Patriots'], ['Okla City Thunder', 'Oklahoma City Thunder'], ['Montreal', 'Montréal Canadiens'], ['St. Louis Blues', 'St Louis Blues'],
+    ['KC Chiefs', 'Kansas City Chiefs'], ['NO Saints', 'New Orleans Saints'], ['Philadelphia 76ers', 'Philadelphia 76ers'], ['Utah', 'Utah Mammoth']];
+  for (const [a, b] of yes) assert.ok(teamMatch(a, b), a + ' ~ ' + b);
+  const no = [['NY Jets', 'New York Giants'], ['New York Jets', 'New York Giants'], ['Los Angeles Rams', 'Los Angeles Chargers'], ['LA Lakers', 'Los Angeles Clippers'],
+    ['NY Rangers', 'New York Islanders'], ['Auburn Tigers', 'LSU Tigers'], ['AUB Tigers', 'LSU Tigers'], ['Boston Celtics', 'Brooklyn Nets']];
+  for (const [a, b] of no) assert.ok(!teamMatch(a, b), a + ' !~ ' + b);
+});
+
+test('legSide: a city-only label is settled by the ticker abbreviation', () => {
+  const c = { home: 'Los Angeles Clippers', away: 'Los Angeles Lakers' };
+  assert.equal(legSide({ ticker: 'KXNBAGAME-26NOV10LALLAC-LAL', yes_sub_title: 'Los Angeles' }, c, 'NBA'), 'away');
+  assert.equal(legSide({ ticker: 'KXNBAGAME-26NOV10LALLAC-LAC', yes_sub_title: 'Los Angeles C' }, c, 'NBA'), 'home');
+  assert.equal(legSide({ ticker: 'KXNBAGAME-26NOV10LALLAC-LAL', yes_sub_title: 'LA Lakers' }, c, 'NBA'), 'away', 'label alone');
+  assert.equal(legSide({ ticker: 'KXNBAGAME-26NOV10LALLAC-ZZZ', yes_sub_title: 'Los Angeles' }, c, 'NBA'), null, 'unknown code and a city-only label → no guess');
+  const ny = { home: 'New York Rangers', away: 'New York Islanders' };
+  assert.equal(legSide({ ticker: 'KXNHLGAME-26NOV12NYINYR-NYI', yes_sub_title: 'New York' }, ny, 'NHL'), 'away');
+  assert.equal(legSide({ ticker: 'KXNHLGAME-26NOV12NYINYR-NYR', yes_sub_title: '' }, ny, 'NHL'), 'home', 'no label at all');
+  assert.equal(Object.keys(TEAM_ALIASES.NFL).length >= 32 && Object.keys(TEAM_ALIASES.NBA).length >= 30 && Object.keys(TEAM_ALIASES.NHL).length >= 32, true, 'every team has a code');
 });
 
 test('team matching and event dates', () => {

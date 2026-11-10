@@ -16,7 +16,7 @@
  */
 
 const ENGINE_DEFAULTS = {
-  enabled: false, env: 'prod', bankroll: 500, kelly: 0.25,
+  enabled: false, shadow: true, env: 'prod', bankroll: 500, kelly: 0.25,
   maxPerGame: 25, maxExposure: 150, dailyLoss: 50, maxOpenGames: 12,
   takerMargin: 0.02, makerMargin: 0.03, sharpWeight: 0.8, minBooks: 1, maxSpread: 0.08,
   makerEnabled: true, takerEnabled: true, preKickoffSec: 120, maxHoursAhead: 36,
@@ -25,7 +25,8 @@ const ENGINE_DEFAULTS = {
   oddsIntervalSec: 300, oddsIntervalNearSec: 120, ntfyTopic: '',
   // v2
   devig: 'power', maxOddsAgeMin: 15, maxDisagree: 0.05, moveGuard: 0.03, staleBookMin: 20, exitEnabled: true, exitMargin: 0.02,
-  brakeMinBets: 20, brakeDays: 7, brakeClv: -0.005, trimMinBets: 30, digestHour: 9, timezone: 'America/New_York'
+  brakeMinBets: 20, brakeDays: 7, brakeClv: -0.005, trimMinBets: 30, digestHour: 9, timezone: 'America/New_York',
+  maxNewOrders: 8 // new live orders per minute; keeps each run inside the Workers free plan's CPU allowance (cancels are never capped)
 };
 const SPORTS = {
   NFL: { odds: 'americanfootball_nfl', series: 'KXNFLGAME' },
@@ -40,16 +41,48 @@ const SHARP_SET = new Set(['pinnacle', 'lowvig', 'betonlineag', 'betfair_ex_eu',
 const MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
 const DAY = 86400000;
 
-const normName = (s) => String(s || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9 ]+/g, ' ').replace(/\b(the|fc|sc|cf|afc)\b/g, ' ').replace(/\s+/g, ' ').trim();
-const tokens = (s) => new Set(normName(s).split(' ').filter(t => t.length > 1));
-// does Kalshi's team label (e.g. "SF 49ers", "San Francisco") refer to the sportsbook team ("San Francisco 49ers")?
+const normName = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9 ]+/g, ' ').replace(/\b(the|fc|sc|cf|afc)\b/g, ' ').replace(/\s+/g, ' ').trim();
+// Matching runs every Kalshi game against every sportsbook game nearby, every minute: memoise the normalised names and the answers.
+const WORDS = new Map(), MATCHES = new Map();
+const words = (s) => { const k = String(s || ''); let w = WORDS.get(k); if (w) return w; if (WORDS.size > 4000) WORDS.clear(); w = normName(k).split(' ').filter(t => t.length > 1); WORDS.set(k, w); return w; };
+// Does Kalshi's team label refer to the sportsbook team? Either every word of the label is in the team's name ("New England",
+// "Patriots", "New England Patriots"), or the nickname is the same and the rest is the city or its initials ("SF 49ers",
+// "Okla City Thunder"). Two teams from one city share words but never a nickname, so "New York Jets" does not match
+// "New York Giants"; a city-only label matches both and is settled by the ticker's team abbreviation (legSide).
 function teamMatch(kalshiLabel, bookTeam) {
-  const a = tokens(kalshiLabel), b = tokens(bookTeam);
-  if (!a.size || !b.size) return false;
-  let hit = 0; for (const t of a) if (b.has(t)) hit++;
-  if (hit === 0) return false;
-  const nickA = normName(kalshiLabel).split(' ').pop(), nickB = normName(bookTeam).split(' ').pop();
-  return nickA === nickB || hit >= Math.min(2, a.size);
+  const key = kalshiLabel + '\u0000' + bookTeam; const hit = MATCHES.get(key); if (hit !== undefined) return hit;
+  if (MATCHES.size > 20000) MATCHES.clear();
+  const r = teamMatchUncached(kalshiLabel, bookTeam); MATCHES.set(key, r); return r;
+}
+function teamMatchUncached(kalshiLabel, bookTeam) {
+  const a = words(kalshiLabel), b = words(bookTeam);
+  if (!a.length || !b.length) return false;
+  if (a.every(t => b.includes(t))) return true;
+  if (a[a.length - 1] !== b[b.length - 1]) return false;
+  const restA = a.slice(0, -1), restB = b.slice(0, -1);
+  if (restA.some(t => restB.includes(t))) return true;
+  // a short code for the city: its initials ("SF", "NE", "LA"), the initials plus a letter ("GSW", "LAR") or the start of it ("BUF", "PHI")
+  const initials = restB.map(t => t[0]).join(''), code = restA[0];
+  return restA.length === 1 && code.length <= 4 && restB.length > 0 && (code === initials || (initials.length > 1 && code.startsWith(initials)) || restB[0].startsWith(code));
+}
+// Team abbreviations as they appear at the end of Kalshi game tickers (KXNBAGAME-26NOV10LALLAC-LAC), mapped to sportsbook names.
+const ALIAS_SRC = {
+  NFL: 'ARI:Arizona Cardinals|ATL:Atlanta Falcons|BAL:Baltimore Ravens|BUF:Buffalo Bills|CAR:Carolina Panthers|CHI:Chicago Bears|CIN:Cincinnati Bengals|CLE:Cleveland Browns|DAL:Dallas Cowboys|DEN:Denver Broncos|DET:Detroit Lions|GB:Green Bay Packers|HOU:Houston Texans|IND:Indianapolis Colts|JAX,JAC:Jacksonville Jaguars|KC:Kansas City Chiefs|LV,LVR:Las Vegas Raiders|LAC:Los Angeles Chargers|LAR,LA:Los Angeles Rams|MIA:Miami Dolphins|MIN:Minnesota Vikings|NE:New England Patriots|NO:New Orleans Saints|NYG:New York Giants|NYJ:New York Jets|PHI:Philadelphia Eagles|PIT:Pittsburgh Steelers|SF:San Francisco 49ers|SEA:Seattle Seahawks|TB:Tampa Bay Buccaneers|TEN:Tennessee Titans|WAS,WSH:Washington Commanders',
+  NBA: 'ATL:Atlanta Hawks|BOS:Boston Celtics|BKN,BRK:Brooklyn Nets|CHA,CHO:Charlotte Hornets|CHI:Chicago Bulls|CLE:Cleveland Cavaliers|DAL:Dallas Mavericks|DEN:Denver Nuggets|DET:Detroit Pistons|GSW,GS:Golden State Warriors|HOU:Houston Rockets|IND:Indiana Pacers|LAC:Los Angeles Clippers|LAL:Los Angeles Lakers|MEM:Memphis Grizzlies|MIA:Miami Heat|MIL:Milwaukee Bucks|MIN:Minnesota Timberwolves|NOP,NO:New Orleans Pelicans|NYK,NY:New York Knicks|OKC:Oklahoma City Thunder|ORL:Orlando Magic|PHI:Philadelphia 76ers|PHX,PHO:Phoenix Suns|POR:Portland Trail Blazers|SAC:Sacramento Kings|SAS,SA:San Antonio Spurs|TOR:Toronto Raptors|UTA,UTAH:Utah Jazz|WAS,WSH:Washington Wizards',
+  NHL: 'ANA:Anaheim Ducks|BOS:Boston Bruins|BUF:Buffalo Sabres|CGY:Calgary Flames|CAR:Carolina Hurricanes|CHI:Chicago Blackhawks|COL:Colorado Avalanche|CBJ:Columbus Blue Jackets|DAL:Dallas Stars|DET:Detroit Red Wings|EDM:Edmonton Oilers|FLA:Florida Panthers|LA,LAK:Los Angeles Kings|MIN:Minnesota Wild|MTL:Montreal Canadiens|NSH:Nashville Predators|NJ,NJD:New Jersey Devils|NYI:New York Islanders|NYR:New York Rangers|OTT:Ottawa Senators|PHI:Philadelphia Flyers|PIT:Pittsburgh Penguins|SJ,SJS:San Jose Sharks|SEA:Seattle Kraken|STL:St Louis Blues|TB,TBL:Tampa Bay Lightning|TOR:Toronto Maple Leafs|UTA,UTAH:Utah|VAN:Vancouver Canucks|VGK,VEG:Vegas Golden Knights|WSH,WAS:Washington Capitals|WPG:Winnipeg Jets'
+};
+const TEAM_ALIASES = {};
+for (const sp in ALIAS_SRC) { TEAM_ALIASES[sp] = {}; for (const part of ALIAS_SRC[sp].split('|')) { const [codes, name] = part.split(':'); for (const code of codes.split(',')) TEAM_ALIASES[sp][code] = name; } }
+// Which side of a sportsbook event (home/away) a Kalshi leg is, or null when the label cannot tell.
+function legSide(m, c, sport) {
+  const abbr = String(m.ticker || '').split('-').pop().toUpperCase();
+  const alias = TEAM_ALIASES[sport] && TEAM_ALIASES[sport][abbr];
+  for (const lab of [m.yes_sub_title, alias]) {
+    if (!lab) continue;
+    const h = teamMatch(lab, c.home), a = teamMatch(lab, c.away);
+    if (h !== a) return h ? 'home' : 'away';
+  }
+  return null;
 }
 function parseEventDate(eventTicker) {
   const m = /-(\d{2})([A-Z]{3})(\d{2})/.exec(eventTicker || '');
@@ -60,13 +93,16 @@ function parseEventDate(eventTicker) {
 function devig2(pA, pB) { const s = pA + pB; return s > 0 ? [pA / s, pB / s] : [null, null]; }
 // Power devig: find k so that Σ q_i^k = 1. Loads more of the margin onto the longshot, which is where
 // sharp books put it (favourite–longshot bias); for near-even games it equals the multiplicative answer.
+// Solved by Newton's method from k = 1: f(k) = Σ q_i^k − 1 is convex and decreasing, so it converges in a handful of steps.
 function devigPower(qs) {
   if (!qs.every(q => q > 0 && q < 1)) return devig2(qs[0], qs[1]);
-  const f = (k) => qs.reduce((s, q) => s + Math.pow(q, k), 0) - 1;
-  let lo = 0.5, hi = 4;
-  if (f(lo) < 0 || f(hi) > 0) return devig2(qs[0], qs[1]); // no root in range (degenerate quotes)
-  for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; if (f(mid) > 0) lo = mid; else hi = mid; }
-  const k = (lo + hi) / 2;
+  const lq = qs.map(Math.log); let k = 1;
+  for (let i = 0; i < 30; i++) {
+    let f = -1, df = 0; for (let j = 0; j < lq.length; j++) { const t = Math.exp(k * lq[j]); f += t; df += t * lq[j]; }
+    if (Math.abs(f) < 1e-13) break;
+    const next = k - f / df; if (!(next > 0.2 && next < 6)) return devig2(qs[0], qs[1]); // degenerate quotes
+    k = next;
+  }
   return qs.map(q => Math.pow(q, k));
 }
 function todayKey(ts) { return new Date(ts).toISOString().slice(0, 10); }
@@ -168,7 +204,7 @@ class EngineDO {
     const add = (t, def) => { try { this.sql.exec('ALTER TABLE ' + t + ' ADD COLUMN ' + def); } catch (e) { /* exists */ } };
     add('games', 'plan TEXT');
     for (const d of ['conf REAL', 'disp REAL', 'line_age INTEGER', 'p_mult REAL', 'p_pow REAL', 'anchor_ts INTEGER', 'anchor_home REAL', 'anchor_away REAL', 'close_p_home REAL', 'close_p_away REAL', 'close_k_home REAL', 'close_k_away REAL', 'closed_ts INTEGER', 'conf_why TEXT']) add('games', d);
-    for (const d of ['sport TEXT', 'conf REAL', 'p_mult REAL', 'p_pow REAL', 'clv REAL', 'clv_mkt REAL', 'action TEXT']) add('bets', d);
+    for (const d of ['sport TEXT', 'conf REAL', 'p_mult REAL', 'p_pow REAL', 'clv REAL', 'clv_mkt REAL', 'action TEXT', 'mode TEXT']) add('bets', d);
     this.sub = 0; this.subMax = Number(env.SUBREQ_BUDGET) || 45;
   }
   /* ---------- settings / log ---------- */
@@ -184,15 +220,18 @@ class EngineDO {
     this.sql.exec("INSERT OR REPLACE INTO settings (key, value) VALUES ('config', ?)", JSON.stringify(next));
     return next;
   }
+  // Small key-value state (cached lines, game lists, budgets, brakes). Reads are served from memory after the first one: the object
+  // is the only writer to its storage, and a fresh instance after eviction starts from storage again.
   kv(key, value) {
-    if (value === undefined) { const r = this.sql.exec('SELECT value FROM settings WHERE key=?', key).toArray()[0]; return r ? JSON.parse(r.value) : null; }
-    if (value === null) { this.sql.exec('DELETE FROM settings WHERE key=?', key); return; }
-    this.sql.exec('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', key, JSON.stringify(value));
+    const c = this.kvc || (this.kvc = new Map());
+    if (value === undefined) { if (c.has(key)) return c.get(key); const r = this.sql.exec('SELECT value FROM settings WHERE key=?', key).toArray()[0]; const v = r ? JSON.parse(r.value) : null; c.set(key, v); return v; }
+    if (value === null) { c.delete(key); this.sql.exec('DELETE FROM settings WHERE key=?', key); return; }
+    c.set(key, value); this.sql.exec('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', key, JSON.stringify(value));
   }
   log(level, msg, data) {
     this.sql.exec('INSERT INTO log (ts, level, msg, data) VALUES (?, ?, ?, ?)', Date.now(), level, String(msg).slice(0, 500), data === undefined ? null : JSON.stringify(data).slice(0, 2000));
-    const n = this.sql.exec('SELECT COUNT(*) AS n FROM log').toArray()[0].n;
-    if (n > 600) this.sql.exec('DELETE FROM log WHERE ts IN (SELECT ts FROM log ORDER BY ts ASC LIMIT ?)', n - 500);
+    if (this.logN === undefined) this.logN = this.sql.exec('SELECT COUNT(*) AS n FROM log').toArray()[0].n; else this.logN++;
+    if (this.logN > 600) { this.sql.exec('DELETE FROM log WHERE ts IN (SELECT ts FROM log ORDER BY ts ASC LIMIT ?)', this.logN - 500); this.logN = 500; }
   }
   async notify(title, body, tags) {
     const cfg = this.settings(); const topic = (cfg.ntfyTopic || this.env.NTFY_TOPIC || '').trim();
@@ -216,7 +255,7 @@ class EngineDO {
     }
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     this.sub++;
-    const res = await fetch(base + path + qs, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const res = await fetch(base + path + qs, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000) });
     const text = await res.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { raw: text }; }
     if (!res.ok) { const e = data && (data.error || data); throw new Error('Kalshi ' + res.status + ' ' + path + ': ' + ((e && (e.message || e.code)) || text.slice(0, 120))); }
     return data;
@@ -228,7 +267,7 @@ class EngineDO {
     u.searchParams.set('apiKey', key); u.searchParams.set('markets', 'h2h'); u.searchParams.set('oddsFormat', 'decimal'); u.searchParams.set('dateFormat', 'unix');
     u.searchParams.set('bookmakers', cfg.bookmakers || ENGINE_DEFAULTS.bookmakers);
     this.sub++;
-    const res = await fetch(u.toString(), { headers: { 'Accept': 'application/json' } });
+    const res = await fetch(u.toString(), { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(15000) });
     const remaining = res.headers.get('x-requests-remaining'); if (remaining !== null) this.kv('odds_remaining', Number(remaining));
     const used = this.kv('odds_used') || { day: '', n: 0 }; const day = todayKey(Date.now());
     this.kv('odds_used', { day, n: (used.day === day ? used.n : 0) + 1, at: Date.now() });
@@ -251,32 +290,46 @@ class EngineDO {
     return { trim: model > market + 0.005 ? 0.5 : 1, n: r.n, model, market };
   }
   /* ---------- the tick ---------- */
-  async tick(reason) {
+  // One tick at a time: the alarm, the cron safety net and a manual tick could otherwise overlap and place the same order twice.
+  // A dry run (opts.dry) goes through every decision but sends, cancels and journals nothing, and says what it would have done.
+  async tick(reason, opts) {
+    const now = Date.now();
+    if (this.ticking && now - this.ticking < 5 * 60000) return { ts: now, reason, busy: true, note: 'another tick is already running', errors: [], notes: [] };
+    this.ticking = now; this.dry = !!(opts && opts.dry);
+    try { return await this.runTick(reason, opts || {}); } finally { this.ticking = 0; this.dry = false; }
+  }
+  async runTick(reason, opts) {
     const cfg = this.settings();
     const now = Date.now();
-    this.sub = 0;
-    const summary = { ts: now, reason, enabled: cfg.enabled, matched: 0, unmatched: 0, taker: 0, maker: 0, cancels: 0, guarded: 0, errors: [], notes: [] };
-    if (!cfg.enabled) { this.kv('last_tick', Object.assign(summary, { note: 'engine off' })); return summary; }
+    this.sub = 0; this.newOrders = 0;
+    const shadow = !!cfg.shadow, dry = !!opts.dry;
+    const W = (did, would) => dry ? would : did;
+    const summary = { ts: now, reason, dry, enabled: cfg.enabled, mode: shadow ? 'shadow' : 'live', matched: 0, unmatched: 0, taker: 0, maker: 0, cancels: 0, guarded: 0, errors: [], notes: [] };
+    if (!cfg.enabled && !opts.force) { this.kv('last_tick', Object.assign(summary, { note: 'engine off' })); return summary; }
     try {
       const st = await this.kalshi(cfg, 'GET', '/exchange/status', null);
       if (!st.trading_active) { this.kv('last_tick', Object.assign(summary, { note: 'exchange closed' })); return summary; }
-      // account + daily stop (a dry run without Kalshi keys assumes an empty account)
-      const signer = await EdgeDeskAccount._internal.signer(this.env, cfg.env === 'demo' ? 'demo' : 'prod');
+      // account + daily stop (shadow mode keeps its own paper account; a dry run without Kalshi keys assumes an empty one)
+      const signer = shadow ? null : await EdgeDeskAccount._internal.signer(this.env, cfg.env === 'demo' ? 'demo' : 'prod');
       let cash, positions = {}, resting = [];
-      if (!signer) {
-        if (reason !== 'preview') throw new Error('no Kalshi API key configured for ' + cfg.env);
+      const dayKey = todayKey(now) + (shadow ? '#s' : '');
+      const day = this.sql.exec('SELECT * FROM daily WHERE day=?', dayKey).toArray()[0] || { realized: 0, fees: 0, bets: 0 };
+      if (day.realized <= -Math.abs(cfg.dailyLoss) && dry) { this.kv('last_tick', Object.assign(summary, { note: 'daily loss stop reached; a real tick would stop the engine' })); return summary; }
+      if (day.realized <= -Math.abs(cfg.dailyLoss)) { this.saveSettings({ enabled: false }); await this.state.storage.deleteAlarm(); this.log('warn', 'Daily loss stop hit; engine disabled', { realized: day.realized, mode: summary.mode }); await this.notify('Edge Desk engine stopped', 'Daily loss stop hit' + (shadow ? ' (shadow)' : '') + ': ' + day.realized.toFixed(2), 'octagonal_sign'); try { await this.flatten(Object.assign({}, cfg, { enabled: false })); } catch (e) { /* best effort */ } this.kv('last_tick', Object.assign(summary, { note: 'daily stop' })); return summary; }
+      if (shadow) {
+        cash = cfg.bankroll - this.shadowCashUsed(); positions = this.shadowPositions(); resting = this.shadowResting();
+      } else if (!signer) {
+        if (!dry) throw new Error('no Kalshi API key configured for ' + cfg.env);
         cash = cfg.bankroll; summary.notes.push('dry run without Kalshi keys: account assumed empty');
       } else {
         const bal = await this.kalshi(cfg, 'GET', '/portfolio/balance', null, undefined, true);
         cash = Number(bal.balance_dollars) || (Number(bal.balance) || 0) / 100;
-        const day = this.sql.exec('SELECT * FROM daily WHERE day=?', todayKey(now)).toArray()[0] || { realized: 0, fees: 0, bets: 0 };
-        if (day.realized <= -Math.abs(cfg.dailyLoss)) { this.saveSettings({ enabled: false }); await this.state.storage.deleteAlarm(); this.log('warn', 'Daily loss stop hit; engine disabled', { realized: day.realized }); await this.notify('Edge Desk engine stopped', 'Daily loss stop hit: ' + day.realized.toFixed(2), 'octagonal_sign'); try { await this.flatten(Object.assign({}, cfg, { enabled: false })); } catch (e) { /* best effort */ } this.kv('last_tick', Object.assign(summary, { note: 'daily stop' })); return summary; }
         const posRes = await this.kalshi(cfg, 'GET', '/portfolio/positions', { settlement_status: 'unsettled', count_filter: 'position', limit: '200' }, undefined, true);
         for (const p of posRes.market_positions || []) { const q = Number(p.position_fp !== undefined ? p.position_fp : (p.position || 0)); positions[p.ticker] = { qty: q, exposure: Number(p.market_exposure_dollars) || (Number(p.market_exposure) || 0) / 100 }; }
         const ordRes = await this.kalshi(cfg, 'GET', '/portfolio/orders', { status: 'resting', limit: '200' }, undefined, true);
         resting = (ordRes.orders || []).map(o => ({ id: o.order_id, ticker: o.ticker, side: o.side === 'no' ? 'no' : 'yes', action: o.action || (o.side === 'ask' ? 'sell' : 'buy'), yes: Number(o.yes_price_dollars !== undefined ? o.yes_price_dollars : (o.yes_price || 0) / 100), remaining: Number(o.remaining_count_fp !== undefined ? o.remaining_count_fp : (o.remaining_count || 0)), client: o.client_order_id }));
       }
-      const ourOrderIds = new Set(this.sql.exec("SELECT order_id FROM bets WHERE status IN ('resting','partial') AND order_id IS NOT NULL").toArray().map(r => r.order_id));
+      const ourOrderIds = new Set(this.sql.exec("SELECT order_id FROM bets WHERE status IN ('resting','partial') AND order_id IS NOT NULL AND COALESCE(mode,'live') = ?", summary.mode).toArray().map(r => r.order_id));
       // exposure across all unsettled positions (engine + manual): conservative
       let exposure = 0; for (const t in positions) exposure += positions[t].exposure;
       for (const o of resting) if (o.action !== 'sell') exposure += o.remaining * (o.side === 'yes' ? o.yes : 1 - o.yes);
@@ -288,18 +341,15 @@ class EngineDO {
       // discover game markets per enabled sport; sports with the soonest games go first so the credit budget favours them
       const sportsOn = Object.keys(SPORTS).filter(s => cfg.sports[s]);
       const discovered = [];
+      const windowLo = now - 18 * 3600000, windowHi = now + (cfg.maxHoursAhead + 12) * 3600000; // event tickers carry a date, not a time
       for (const sport of sportsOn) {
         if (this.budgetLeft() < 6) { summary.notes.push('request budget reached before ' + sport + '; next minute'); break; }
         const spec = SPORTS[sport];
-        let markets = [];
-        try { let cursor = ''; for (let p = 0; p < 5; p++) { const r = await this.kalshi(cfg, 'GET', '/markets', { series_ticker: spec.series, status: 'open', limit: '200', cursor: cursor || undefined }); markets = markets.concat(r.markets || []); cursor = r.cursor || ''; if (!cursor) break; } }
+        let gm;
+        try { gm = await this.gameMarkets(cfg, sport, spec, now, windowLo, windowHi); }
         catch (e) { summary.errors.push(sport + ': ' + e.message); continue; }
-        const byEvent = {};
-        for (const m of markets) { if (!m.event_ticker) continue; (byEvent[m.event_ticker] = byEvent[m.event_ticker] || []).push(m); }
-        const eventDates = Object.keys(byEvent).map(k => parseEventDate(k)).filter(Boolean);
-        const soonest = eventDates.length ? Math.min(...eventDates) : null;
-        if (!Object.keys(byEvent).length) continue;
-        discovered.push({ sport, spec, byEvent, soonest });
+        if (gm.soonest === null) continue;
+        discovered.push({ sport, spec, byEvent: gm.byEvent, soonest: gm.soonest });
       }
       discovered.sort((a, b) => (a.soonest === null ? Infinity : a.soonest) - (b.soonest === null ? Infinity : b.soonest));
       summary.odds = summary.odds || {};
@@ -338,12 +388,13 @@ class EngineDO {
           if (legs.length !== 2) continue; // moneyline events have exactly two team legs
           const evDate = parseEventDate(eventTicker);
           const label = (m) => m.yes_sub_title || m.title || m.ticker;
-          // match to a consensus event by teams and date
+          // match to a consensus event by date and teams: each leg must name a different side of the same game
           let match = null;
           for (const c of oc.list) {
             if (evDate !== null && c.commence !== null && Math.abs(c.commence - evDate) > 40 * 3600000) continue;
-            const l0h = teamMatch(label(legs[0]), c.home), l0a = teamMatch(label(legs[0]), c.away), l1h = teamMatch(label(legs[1]), c.home), l1a = teamMatch(label(legs[1]), c.away);
-            if ((l0h && l1a) || (l0a && l1h)) { match = { c, homeLeg: l0h ? legs[0] : legs[1], awayLeg: l0h ? legs[1] : legs[0] }; break; }
+            const s0 = legSide(legs[0], c, sport); if (!s0) continue;
+            const s1 = legSide(legs[1], c, sport);
+            if (s1 && s0 !== s1) { match = { c, homeLeg: s0 === 'home' ? legs[0] : legs[1], awayLeg: s0 === 'home' ? legs[1] : legs[0] }; break; }
           }
           const g = { id: eventTicker, sport, event_ticker: eventTicker, updated_ts: now };
           const prev = this.sql.exec('SELECT status, p_home, commence_ts, anchor_ts, anchor_home, anchor_away, closed_ts FROM games WHERE id=?', g.id).toArray()[0] || {};
@@ -363,6 +414,14 @@ class EngineDO {
           const px = (m) => ({ bid: Number(m.yes_bid_dollars !== undefined ? m.yes_bid_dollars : (m.yes_bid || 0) / 100), ask: Number(m.yes_ask_dollars !== undefined ? m.yes_ask_dollars : (m.yes_ask || 100) / 100), askSize: Number(m.yes_ask_size_fp || 0), bidSize: Number(m.yes_bid_size_fp || 0) });
           const H = px(homeLeg), A = px(awayLeg);
           const midOf = (P) => P.bid > 0 && P.ask < 1 ? (P.bid + P.ask) / 2 : null;
+          if (shadow && !dry) { // paper quotes fill only when the market trades through them; checked before any pull so a fill that would have happened is kept
+            let filledAny = false;
+            for (const [lg, PP] of [[homeLeg, H], [awayLeg, A]]) for (const o of resting) if (o.ticker === lg.ticker && !o.pulled) {
+              const hit = o.action === 'sell' ? (PP.bid > 0 && PP.bid >= o.yes - 1e-9) : (PP.ask < 1 && PP.ask > 0 && PP.ask <= o.yes + 1e-9);
+              if (hit) { this.sql.exec("UPDATE bets SET fill_count = count, status = 'filled', note = 'shadow fill' WHERE order_id = ?", o.id); o.pulled = true; filledAny = true; this.log('info', 'Shadow fill: ' + o.remaining + ' YES ' + lg.ticker + ' ' + o.action + ' @ ' + o.yes.toFixed(2)); }
+            }
+            if (filledAny) positions = this.shadowPositions();
+          }
           const secsToKick = (c.commence - now) / 1000;
           const cf = confidence(c, cfg, secsToKick, oddsAge);
           let status = secsToKick <= cfg.preKickoffSec ? 'live' : (secsToKick > cfg.maxHoursAhead * 3600 ? 'far' : 'active');
@@ -400,26 +459,28 @@ class EngineDO {
           for (const [leg, pSharp, team, pM, pP] of [[homeLeg, c.pHome, c.home, c.pMult, c.pPow], [awayLeg, c.pAway, c.away, 1 - c.pMult, 1 - c.pPow]]) {
             const P = px(leg); if (!(P.bid >= 0) || !(P.ask <= 1)) { pnote(team, 'no quote on Kalshi'); continue; }
             const mid = midOf(P) !== null ? midOf(P) : pSharp;
-            const pStar = cfg.sharpWeight * pSharp + (1 - cfg.sharpWeight) * mid;
             const spread = P.ask - P.bid;
+            // Kalshi's own price earns its share of fair value only when its book is tight; the midpoint of a wide spread says little
+            const kw = (1 - cfg.sharpWeight) * Math.max(0, Math.min(1, 1 - (spread - 0.02) / 0.06));
+            const pStar = (1 - kw) * pSharp + kw * mid;
             const room = Math.max(0, Math.min(cfg.maxPerGame - liveExposure, cfg.maxExposure - exposure, cash - 1));
-            const base = { pSharp: +pSharp.toFixed(4), pStar: +pStar.toFixed(4), bid: P.bid, ask: P.ask, conf: cf.conf, confWhy: cf.why.join('; '), trim: trim.trim, books: c.books, disp: +c.disp.toFixed(4) };
+            const base = { pSharp: +pSharp.toFixed(4), pStar: +pStar.toFixed(4), kw: +kw.toFixed(3), bid: P.bid, ask: P.ask, conf: cf.conf, confWhy: cf.why.join('; '), trim: trim.trim, books: c.books, disp: +c.disp.toFixed(4) };
             if (room < 1) { pnote(team, 'no room under the per-game or total exposure cap', base); continue; }
             if (openGames >= cfg.maxOpenGames && !positions[leg.ticker]) { pnote(team, 'max open games reached', base); continue; }
             if (this.budgetLeft() < 3) { pnote(team, 'request budget for this minute used; next minute', base); continue; }
             // exits: sell what the engine holds when Kalshi now pays more than fair value (fill-or-cancel), otherwise rest a reduce-only ask above fair
-            const held = this.engineHeld(leg.ticker);
+            const held = this.engineHeld(leg.ticker, summary.mode);
             const sellable = Math.min(held, (positions[leg.ticker] && positions[leg.ticker].qty) || 0);
             if (cfg.exitEnabled && sellable >= 1) {
               const exitFee1 = feeFor(1, P.bid, 'taker', feeInfo);
               const mineAsks = resting.filter(o => o.ticker === leg.ticker && o.action === 'sell' && ourOrderIds.has(o.id) && !o.pulled);
-              if (P.bid > 0 && P.bid - exitFee1 >= pStar + cfg.exitMargin - 1e-9) {
+              if (cfg.takerEnabled && P.bid > 0 && P.bid - exitFee1 >= pStar + cfg.exitMargin - 1e-9) {
                 for (const o of mineAsks) { await this.cancel(cfg, o, 'taking the bid instead'); o.pulled = true; summary.cancels++; }
                 const count = Math.min(sellable, Math.floor(P.bidSize || sellable));
                 if (count >= 1) {
                   const r = await this.place(cfg, { ticker: leg.ticker, team, side: 'yes', action: 'sell', count, limit: P.bid, tif: 'ioc', kind: 'exit', pSharp, pMarket: mid, pStar, edge: P.bid - exitFee1 - pStar, gameId: g.id, fee: feeFor(count, P.bid, 'taker', feeInfo), sport, conf: cf.conf, pMult: pM, pPow: pP });
-                  if (r) { summary.exits = (summary.exits || 0) + 1; }
-                  pnote(team, 'sold ' + count + ' at ' + P.bid.toFixed(2) + ': Kalshi now pays ' + ((P.bid - exitFee1 - pStar) * 100).toFixed(1) + '¢ over fair, so the profit is taken rather than waited for', base);
+                  if (r) { summary.exits = (summary.exits || 0) + 1; pnote(team, W('sold ', 'would sell ') + count + ' at ' + P.bid.toFixed(2) + ': Kalshi now pays ' + ((P.bid - exitFee1 - pStar) * 100).toFixed(1) + '¢ over fair, so the profit is taken rather than waited for', base); }
+                  else pnote(team, 'would sell ' + count + ' at ' + P.bid.toFixed(2) + ', but ' + this.lastSkip, base);
                 }
               } else if (cfg.makerEnabled) {
                 const askFee1 = feeFor(1, Math.min(0.99, pStar + cfg.makerMargin), 'maker', feeInfo);
@@ -431,7 +492,8 @@ class EngineDO {
                   if (keepAsk) pnote(team, 'holding ' + sellable + '; ask resting at ' + wantAsk.toFixed(2) + ' to sell above fair ' + pStar.toFixed(2), base);
                   else {
                     const r = await this.place(cfg, { ticker: leg.ticker, team, side: 'yes', action: 'sell', count: sellable, limit: wantAsk, tif: 'gtc', postOnly: true, kind: 'exit_maker', pSharp, pMarket: mid, pStar, edge: wantAsk - askFee1 - pStar, gameId: g.id, fee: feeFor(sellable, wantAsk, 'maker', feeInfo), sport, conf: cf.conf, pMult: pM, pPow: pP });
-                    if (r) { summary.maker++; pnote(team, 'holding ' + sellable + '; placed ask ' + sellable + ' at ' + wantAsk.toFixed(2) + ' to sell above fair ' + pStar.toFixed(2), base); }
+                    if (r) { summary.maker++; pnote(team, 'holding ' + sellable + '; ' + W('placed ask ', 'would place ask ') + sellable + ' at ' + wantAsk.toFixed(2) + ' to sell above fair ' + pStar.toFixed(2), base); }
+                    else pnote(team, 'holding ' + sellable + '; ask at ' + wantAsk.toFixed(2) + ' not placed: ' + this.lastSkip, base);
                   }
                 }
               }
@@ -440,15 +502,15 @@ class EngineDO {
             if (cfg.takerEnabled && P.ask < 1 && P.ask > 0.02 && spread <= cfg.maxSpread + 1e-6) {
               const fee1 = feeFor(1, P.ask, 'taker', feeInfo);
               if (P.ask + fee1 + cfg.takerMargin <= pStar + 1e-9) {
-                const lastTake = this.sql.exec("SELECT MAX(ts) AS ts FROM bets WHERE ticker=? AND kind='taker' AND fill_count > 0", leg.ticker).toArray()[0];
+                const lastTake = this.sql.exec("SELECT MAX(ts) AS ts FROM bets WHERE ticker=? AND kind='taker' AND fill_count > 0 AND COALESCE(mode,'live') = ?", leg.ticker, summary.mode).toArray()[0];
                 if (lastTake && lastTake.ts !== null && oc.at <= lastTake.ts) { pnote(team, 'still cheap, but already bought at this line; waiting for fresh lines before adding', base); continue; }
                 {
                   let count = kellyCount(pStar, P.ask, fee1, sizeBank, cfg.kelly, room);
                   count = Math.min(count, Math.floor(P.askSize || count));
                   if (count >= 1) {
                     const r = await this.place(cfg, { ticker: leg.ticker, team, side: 'yes', action: 'buy', count, limit: P.ask, tif: 'ioc', kind: 'taker', pSharp, pMarket: mid, pStar, edge: pStar - P.ask - fee1, gameId: g.id, fee: feeFor(count, P.ask, 'taker', feeInfo), sport, conf: cf.conf, pMult: pM, pPow: pP });
-                    if (r) { summary.taker++; exposure += count * P.ask; liveExposure += count * P.ask; }
-                    pnote(team, 'took the ask: ' + count + ' at ' + P.ask.toFixed(2) + ' (edge ' + ((pStar - P.ask - fee1) * 100).toFixed(1) + '¢' + (cf.conf < 1 ? ', sized at ' + Math.round(cf.conf * trim.trim * 100) + '%' : '') + ')', base);
+                    if (r) { summary.taker++; exposure += count * P.ask; liveExposure += count * P.ask; pnote(team, W('took the ask: ', 'would take the ask: ') + count + ' at ' + P.ask.toFixed(2) + ' (edge ' + ((pStar - P.ask - fee1) * 100).toFixed(1) + '¢' + (cf.conf < 1 ? ', sized at ' + Math.round(cf.conf * trim.trim * 100) + '%' : '') + ')', base); }
+                    else pnote(team, 'cheap at ' + P.ask.toFixed(2) + ' (edge ' + ((pStar - P.ask - fee1) * 100).toFixed(1) + '¢), but ' + this.lastSkip, base);
                     continue; // one action per leg per tick
                   } else if (cf.conf < 1) { pnote(team, 'cheap vs fair, but confidence ' + Math.round(cf.conf * 100) + '% (' + cf.why.join('; ') + ') sizes it below one contract', base); continue; }
                 }
@@ -469,8 +531,8 @@ class EngineDO {
               const count = kellyCount(pStar, want, makerFee1, sizeBank, cfg.kelly, roomNow);
               if (count < 1) { pnote(team, 'edge too small to size a bid at ' + want.toFixed(2) + (cf.conf < 1 ? ' at ' + Math.round(cf.conf * trim.trim * 100) + '% confidence' : ''), base); continue; }
               const r = await this.place(cfg, { ticker: leg.ticker, team, side: 'yes', action: 'buy', count, limit: want, tif: 'gtc', postOnly: true, kind: 'maker', pSharp, pMarket: mid, pStar, edge: pStar - want - makerFee1, gameId: g.id, fee: feeFor(count, want, 'maker', feeInfo), sport, conf: cf.conf, pMult: pM, pPow: pP });
-              if (r) { summary.maker++; exposure += count * want; liveExposure += count * want; pnote(team, 'placed bid ' + count + ' at ' + want.toFixed(2) + ' (fair ' + pStar.toFixed(2) + (cf.conf < 1 ? ', sized at ' + Math.round(cf.conf * trim.trim * 100) + '%' : '') + ')', base); }
-              else pnote(team, 'bid rejected; see log', base);
+              if (r) { summary.maker++; exposure += count * want; liveExposure += count * want; pnote(team, W('placed bid ', 'would place bid ') + count + ' at ' + want.toFixed(2) + ' (fair ' + pStar.toFixed(2) + (cf.conf < 1 ? ', sized at ' + Math.round(cf.conf * trim.trim * 100) + '%' : '') + ')', base); }
+              else pnote(team, 'bid ' + count + ' at ' + want.toFixed(2) + ' not placed: ' + this.lastSkip, base);
             } else pnote(team, 'maker quoting off', base);
           }
           this.sql.exec('UPDATE games SET plan=? WHERE id=?', JSON.stringify(plan), g.id);
@@ -478,8 +540,8 @@ class EngineDO {
       }
       summary.exposure = Math.round(exposure * 100) / 100;
       summary.oddsBudget = { daily: oddsBudget(this.kv('odds_remaining'), 0).daily === Infinity ? null : oddsBudget(this.kv('odds_remaining'), 0).daily, usedToday: this.oddsUsedToday(), remaining: this.kv('odds_remaining') };
-      if (signer) {
-        await this.reconcile(cfg, resting, now);
+      if ((signer || shadow) && !dry) {
+        if (signer) await this.reconcile(cfg, resting, now);
         this.scoreClosed(); // fills that reconcile just learned about on games already past their closing line
         await this.settle(cfg);
         this.evaluateBrakes(cfg);
@@ -490,31 +552,110 @@ class EngineDO {
       this.log('error', 'tick failed', { error: e.message });
     }
     summary.subrequests = this.sub;
+    if (this.deferred) { summary.notes.push(this.deferred + ' new order' + (this.deferred > 1 ? 's' : '') + ' left for next minute (at most ' + (cfg.maxNewOrders || 8) + ' a minute)'); this.deferred = 0; }
+    if (!dry) await this.watchdog(cfg, summary);
     this.kv('last_tick', summary);
     return summary;
+  }
+  // Repeated failures: push an alert after 5 failing ticks in a row. In live mode, after 30 ticks in a row with failures that are
+  // not just the sharp-lines feed (stale lines already stop trading on their own), stop the engine and cancel its quotes.
+  async watchdog(cfg, summary) {
+    const st = this.kv('err_streak') || { n: 0, hard: 0, alerted: false };
+    if (!summary.errors.length) { if (st.n) this.kv('err_streak', null); return; }
+    const hard = summary.errors.filter(e => !/ odds: /.test(e));
+    st.n++; st.hard = hard.length ? (st.hard || 0) + 1 : 0; st.last = summary.errors[0]; st.at = st.at || summary.ts;
+    if (st.n >= 5 && !st.alerted) { st.alerted = true; this.log('warn', 'Watchdog: ' + st.n + ' failing ticks in a row', { error: st.last }); await this.notify('Edge Desk: engine ticks failing', st.n + ' ticks in a row have failed. Last error: ' + st.last, 'warning'); }
+    if (!cfg.shadow && st.hard >= 30) {
+      this.saveSettings({ enabled: false }); await this.state.storage.deleteAlarm();
+      try { await this.flatten(cfg); } catch (e) { /* best effort */ }
+      this.log('error', 'Watchdog stopped the engine after ' + st.hard + ' failing ticks in a row', { error: st.last });
+      await this.notify('Edge Desk engine stopped', 'Stopped after ' + st.hard + ' failing ticks in a row. Last error: ' + st.last, 'octagonal_sign');
+      summary.notes.push('the watchdog stopped the engine after ' + st.hard + ' failing ticks in a row');
+      this.kv('err_streak', null); return;
+    }
+    this.kv('err_streak', st);
+  }
+  // Open game markets for one sport, with current prices, for the games inside the trading window. The full list (often two weeks
+  // of games) is fetched at most every 10 minutes; in between, only the in-window games are re-priced by ticker, which keeps each
+  // tick small enough for the Workers free plan. If re-pricing by ticker ever comes back incomplete, the full list is fetched.
+  async gameMarkets(cfg, sport, spec, now, lo, hi) {
+    const key = 'disc_' + sport; let d = this.kv(key); let fresh = null;
+    const full = async () => {
+      let markets = []; let cursor = '';
+      for (let p = 0; p < 5; p++) { const r = await this.kalshi(cfg, 'GET', '/markets', { series_ticker: spec.series, status: 'open', limit: '200', cursor: cursor || undefined }); markets = markets.concat(r.markets || []); cursor = r.cursor || ''; if (!cursor) break; }
+      const events = {};
+      for (const m of markets) { if (!m.event_ticker || (m.market_type || 'binary') !== 'binary') continue; (events[m.event_ticker] = events[m.event_ticker] || []).push({ ticker: m.ticker, event_ticker: m.event_ticker, yes_sub_title: m.yes_sub_title || '', title: String(m.title || '').slice(0, 120), market_type: 'binary' }); }
+      d = { at: now, events }; this.kv(key, d);
+      fresh = {}; for (const m of markets) fresh[m.ticker] = m;
+    };
+    if (!d || !d.events || now - d.at > 10 * 60000) await full();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const dates = Object.keys(d.events).map(ev => [ev, parseEventDate(ev)]);
+      const inWindow = dates.filter(([, t]) => t === null || (t >= lo && t <= hi)).map(([ev]) => ev);
+      const upcoming = dates.map(([, t]) => t).filter(t => t !== null && t >= lo);
+      const soonest = upcoming.length ? Math.min(...upcoming) : (inWindow.length ? now : null);
+      const wanted = []; for (const ev of inWindow) for (const l of d.events[ev]) wanted.push(l.ticker);
+      let priced = fresh;
+      if (!priced && wanted.length) {
+        priced = {};
+        const unsupported = this.kv('tickers_unsupported');
+        if (!(unsupported && now - unsupported.at < DAY)) {
+          let returned = 0;
+          for (let i = 0; i < wanted.length; i += 40) { const r = await this.kalshi(cfg, 'GET', '/markets', { tickers: wanted.slice(i, i + 40).join(','), limit: '200' }); for (const m of r.markets || []) { returned++; priced[m.ticker] = m; } }
+          if (returned > 0 && wanted.every(t => !priced[t])) this.kv('tickers_unsupported', { at: now }); // the filter was ignored: other markets came back
+        }
+        if (wanted.some(t => !priced[t]) && attempt === 0) { await full(); continue; }
+      }
+      const byEvent = {};
+      for (const ev of inWindow) {
+        const legs = d.events[ev].map(l => priced && priced[l.ticker] ? Object.assign({}, l, priced[l.ticker]) : null).filter(m => m && (!m.status || m.status === 'active' || m.status === 'open'));
+        if (legs.length) byEvent[ev] = legs;
+      }
+      return { byEvent, soonest };
+    }
+    return { byEvent: {}, soonest: null };
   }
   async place(cfg, o) {
     const lim = EdgeDeskAccount._internal.limits(this.env);
     const t = EdgeDeskAccount._internal.toV2Order({ ticker: o.ticker, side: o.side, action: o.action, count: o.count, limit: o.limit, tif: o.tif, postOnly: o.postOnly }, lim);
-    if (t.error) { this.log('warn', 'order blocked by Worker caps', { ticker: o.ticker, error: t.error }); return null; }
-    if (this.budgetLeft() < 2) { this.log('warn', 'order skipped: request budget for this minute used', { ticker: o.ticker }); return null; }
+    this.lastSkip = '';
+    if (t.error) { this.lastSkip = 'blocked by the Worker\'s per-order cap'; this.log('warn', 'order blocked by Worker caps', { ticker: o.ticker, error: t.error }); return null; }
+    if (this.dry) return { dry: true, order_id: null, fill_count: '0', remaining_count: String(o.count) };
+    if (this.budgetLeft() < 2) { this.lastSkip = 'request budget for this minute used; next minute'; this.log('warn', 'order skipped: request budget for this minute used', { ticker: o.ticker }); return null; }
+    if (!cfg.shadow && this.newOrders >= (cfg.maxNewOrders || 8)) { this.lastSkip = 'waiting a minute: at most ' + (cfg.maxNewOrders || 8) + ' new orders a minute'; this.deferred = (this.deferred || 0) + 1; return null; }
+    if (!cfg.shadow) this.newOrders++;
     const id = crypto.randomUUID();
+    const mode = cfg.shadow ? 'shadow' : 'live';
+    if (cfg.shadow) {
+      // paper: an immediate order fills at its price for the visible size; a resting one fills later only if the market trades through it
+      const selling = o.action === 'sell';
+      const filled = o.tif === 'ioc' ? o.count : 0;
+      const status = o.tif === 'ioc' ? 'filled' : 'resting';
+      const orderId = 'shadow-' + id.slice(0, 13);
+      this.sql.exec('INSERT INTO bets (id, ts, game_id, ticker, team, side, kind, count, price, fee, p_sharp, p_market, p_star, edge, order_id, status, fill_count, note, sport, conf, p_mult, p_pow, action, mode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        id, Date.now(), o.gameId, o.ticker, o.team, o.side, o.kind, o.count, o.limit, o.fee, o.pSharp, o.pMarket, o.pStar, o.edge, orderId, status, filled, o.tif, o.sport || null, o.conf === undefined ? null : o.conf, o.pMult === undefined ? null : o.pMult, o.pPow === undefined ? null : o.pPow, selling ? 'sell' : 'buy', 'shadow');
+      this.sql.exec('INSERT INTO daily (day, bets, taker_bets) VALUES (?, 1, ?) ON CONFLICT(day) DO UPDATE SET bets = bets + 1, taker_bets = taker_bets + ?', todayKey(Date.now()) + '#s', o.kind === 'taker' ? 1 : 0, o.kind === 'taker' ? 1 : 0);
+      this.log('info', 'Shadow: ' + (selling ? (o.tif === 'ioc' ? 'sold ' : 'asked ') : (o.kind === 'taker' ? 'took ' : 'quoted ')) + o.count + ' YES ' + o.ticker + ' @ ' + o.limit.toFixed(2) + ' (p*=' + o.pStar.toFixed(3) + ', sharp=' + o.pSharp.toFixed(3) + ') → ' + status);
+      return { order_id: orderId, fill_count: String(filled), remaining_count: String(o.count - filled), shadow: true };
+    }
     try {
       const r = await this.kalshi(cfg, 'POST', '/portfolio/events/orders', null, t.body, true);
       const filled = Number(r.fill_count || 0), remaining = Number(r.remaining_count || 0);
       const status = o.tif === 'gtc' ? (filled > 0 && remaining > 0 ? 'partial' : (filled > 0 ? 'filled' : 'resting')) : (filled > 0 ? 'filled' : 'cancelled');
       const avg = r.average_fill_price !== undefined && filled > 0 ? Number(r.average_fill_price) : o.limit;
       const selling = o.action === 'sell';
-      this.sql.exec('INSERT INTO bets (id, ts, game_id, ticker, team, side, kind, count, price, fee, p_sharp, p_market, p_star, edge, order_id, status, fill_count, note, sport, conf, p_mult, p_pow, action) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        id, Date.now(), o.gameId, o.ticker, o.team, o.side, o.kind, o.count, avg, o.fee, o.pSharp, o.pMarket, o.pStar, o.edge, r.order_id || null, status, filled, o.tif, o.sport || null, o.conf === undefined ? null : o.conf, o.pMult === undefined ? null : o.pMult, o.pPow === undefined ? null : o.pPow, selling ? 'sell' : 'buy');
+      this.sql.exec('INSERT INTO bets (id, ts, game_id, ticker, team, side, kind, count, price, fee, p_sharp, p_market, p_star, edge, order_id, status, fill_count, note, sport, conf, p_mult, p_pow, action, mode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        id, Date.now(), o.gameId, o.ticker, o.team, o.side, o.kind, o.count, avg, o.fee, o.pSharp, o.pMarket, o.pStar, o.edge, r.order_id || null, status, filled, o.tif, o.sport || null, o.conf === undefined ? null : o.conf, o.pMult === undefined ? null : o.pMult, o.pPow === undefined ? null : o.pPow, selling ? 'sell' : 'buy', mode);
       this.sql.exec('INSERT INTO daily (day, bets, taker_bets) VALUES (?, 1, ?) ON CONFLICT(day) DO UPDATE SET bets = bets + 1, taker_bets = taker_bets + ?', todayKey(Date.now()), o.kind === 'taker' ? 1 : 0, o.kind === 'taker' ? 1 : 0);
       this.log('info', (selling ? (o.tif === 'ioc' ? 'Sold ' : 'Asked ') : (o.kind === 'taker' ? 'Took ' : 'Quoted ')) + o.count + ' YES ' + o.ticker + ' @ ' + o.limit.toFixed(2) + ' (p*=' + o.pStar.toFixed(3) + ', sharp=' + o.pSharp.toFixed(3) + (o.conf !== undefined && o.conf < 1 ? ', conf ' + Math.round(o.conf * 100) + '%' : '') + ') → ' + status, { filled, remaining });
       if (o.kind === 'taker' && filled > 0) await this.notify('Edge Desk: bought ' + filled + ' YES ' + o.team, o.ticker + ' at ' + avg.toFixed(2) + ' · fair ' + o.pStar.toFixed(2) + ' · edge ' + (o.edge * 100).toFixed(1) + '¢');
       if (o.kind === 'exit' && filled > 0) await this.notify('Edge Desk: sold ' + filled + ' YES ' + o.team, o.ticker + ' at ' + avg.toFixed(2) + ' · fair ' + o.pStar.toFixed(2) + ' · ' + (o.edge * 100).toFixed(1) + '¢ over fair', 'moneybag');
       return r;
-    } catch (e) { this.log('error', 'order failed ' + o.ticker, { error: e.message }); return null; }
+    } catch (e) { this.lastSkip = 'the exchange refused the order; see log'; this.log('error', 'order failed ' + o.ticker, { error: e.message }); return null; }
   }
   async cancel(cfg, o, why) {
+    if (this.dry) return;
+    if (String(o.id).startsWith('shadow-')) { this.sql.exec("UPDATE bets SET status = CASE WHEN fill_count > 0 THEN 'filled' ELSE 'cancelled' END, note = ? WHERE order_id = ?", why, o.id); this.log('info', 'Shadow: cancelled ' + o.ticker + ' @ ' + o.yes.toFixed(2) + ' (' + why + ')'); return; }
     try {
       await this.kalshi(cfg, 'DELETE', '/portfolio/events/orders/' + encodeURIComponent(o.id), { exchange_index: '-1', market_ticker: o.ticker }, undefined, true);
       this.sql.exec("UPDATE bets SET status = CASE WHEN fill_count > 0 THEN 'filled' ELSE 'cancelled' END, note = ? WHERE order_id = ?", why, o.id);
@@ -523,7 +664,7 @@ class EngineDO {
   }
   // Sync resting-order state with the exchange. `resting` is the snapshot taken at `snapshotTs`; orders placed after it are left alone.
   async reconcile(cfg, resting, snapshotTs) {
-    const open = this.sql.exec("SELECT * FROM bets WHERE status IN ('resting','partial') AND order_id IS NOT NULL AND ts < ?", snapshotTs - 500).toArray();
+    const open = this.sql.exec("SELECT * FROM bets WHERE status IN ('resting','partial') AND order_id IS NOT NULL AND COALESCE(mode,'live') = 'live' AND ts < ?", snapshotTs - 500).toArray();
     for (const b of open) {
       const o = resting.find(x => x.id === b.order_id);
       if (o) { const filled = Math.max(0, b.count - o.remaining); if (Math.abs(filled - (b.fill_count || 0)) > 1e-9) { this.sql.exec("UPDATE bets SET fill_count=?, status=? WHERE id=?", filled, filled > 0 ? 'partial' : 'resting', b.id); } continue; }
@@ -540,9 +681,14 @@ class EngineDO {
   }
   async settle(cfg) {
     const rows = this.sql.exec("SELECT b.*, g.commence_ts FROM bets b LEFT JOIN games g ON g.id = b.game_id WHERE b.status IN ('filled','partial') AND b.fill_count > 0 AND (g.commence_ts IS NULL OR g.commence_ts < ?) ORDER BY g.commence_ts ASC", Date.now() - 2 * 3600000).toArray();
-    const seen = {}; let lookups = 0;
+    const seen = {}; let lookups = 0; const nextCheck = this.kv('settle_next') || {}; const now = Date.now(); let touched = false;
     for (const b of rows) {
-      if (!(b.ticker in seen)) { if (lookups >= 8 || this.budgetLeft() < 3) continue; lookups++; try { const r = await this.kalshi(cfg, 'GET', '/markets/' + encodeURIComponent(b.ticker), null); seen[b.ticker] = (r.market || r).result || ''; } catch (e) { seen[b.ticker] = ''; } }
+      if (!(b.ticker in seen)) {
+        if ((nextCheck[b.ticker] || 0) > now) continue; // asked recently; markets settle hours after the game
+        if (lookups >= 8 || this.budgetLeft() < 3) continue; lookups++;
+        try { const r = await this.kalshi(cfg, 'GET', '/markets/' + encodeURIComponent(b.ticker), null); seen[b.ticker] = (r.market || r).result || ''; } catch (e) { seen[b.ticker] = ''; }
+        if (seen[b.ticker] !== 'yes' && seen[b.ticker] !== 'no') { nextCheck[b.ticker] = now + 15 * 60000; touched = true; } else if (nextCheck[b.ticker]) { delete nextCheck[b.ticker]; touched = true; }
+      }
       const result = seen[b.ticker];
       if (result !== 'yes' && result !== 'no') continue;
       const won = result === b.side;
@@ -550,13 +696,29 @@ class EngineDO {
       // a sell books the difference between what it got and what the contract settled at; buys and sells on one ticker then sum to the position's true result
       const pnl = b.action === 'sell' ? b.fill_count * (b.price - (won ? 1 : 0)) - feePaid : b.fill_count * (won ? (1 - b.price) : -b.price) - feePaid;
       this.sql.exec("UPDATE bets SET status='settled', result=?, pnl=?, settled_ts=? WHERE id=?", result, pnl, Date.now(), b.id);
-      this.sql.exec('INSERT INTO daily (day, realized, fees, bets) VALUES (?, ?, ?, 0) ON CONFLICT(day) DO UPDATE SET realized = realized + ?, fees = fees + ?', todayKey(Date.now()), pnl, b.fee || 0, pnl, b.fee || 0);
-      this.log('info', 'Settled ' + b.ticker + ' ' + result.toUpperCase() + ' → ' + (pnl >= 0 ? '+' : '') + pnl.toFixed(2));
+      this.sql.exec('INSERT INTO daily (day, realized, fees, bets) VALUES (?, ?, ?, 0) ON CONFLICT(day) DO UPDATE SET realized = realized + ?, fees = fees + ?', todayKey(Date.now()) + (b.mode === 'shadow' ? '#s' : ''), pnl, feePaid, pnl, feePaid);
+      this.log('info', (b.mode === 'shadow' ? 'Shadow settled ' : 'Settled ') + b.ticker + ' ' + result.toUpperCase() + ' → ' + (pnl >= 0 ? '+' : '') + pnl.toFixed(2));
     }
+    if (touched) this.kv('settle_next', nextCheck);
+  }
+  /* ---------- shadow (paper) account derived from the journal ---------- */
+  shadowPositions() {
+    const out = {};
+    for (const r of this.sql.exec("SELECT ticker, SUM(CASE WHEN action='sell' THEN -fill_count ELSE fill_count END) AS q, SUM(CASE WHEN action='sell' THEN -fill_count * price ELSE fill_count * price END) AS cost FROM bets WHERE mode='shadow' AND status IN ('filled','partial') AND fill_count > 0 GROUP BY ticker").toArray()) if (r.q > 1e-9) out[r.ticker] = { qty: r.q, exposure: Math.max(0, r.cost) };
+    return out;
+  }
+  shadowResting() {
+    return this.sql.exec("SELECT order_id, ticker, action, price, count, fill_count FROM bets WHERE mode='shadow' AND status IN ('resting','partial')").toArray().map(r => ({ id: r.order_id, ticker: r.ticker, side: 'yes', action: r.action || 'buy', yes: r.price, remaining: r.count - (r.fill_count || 0), client: null }));
+  }
+  shadowCashUsed() {
+    const r = this.sql.exec("SELECT SUM(CASE WHEN action='sell' THEN -fill_count * price ELSE fill_count * price END) AS c FROM bets WHERE mode='shadow' AND status IN ('filled','partial') AND fill_count > 0").toArray()[0];
+    const realized = this.sql.exec("SELECT SUM(pnl) AS p FROM bets WHERE mode='shadow' AND status='settled'").toArray()[0];
+    return Math.max(0, Number((r && r.c) || 0)) - Number((realized && realized.p) || 0);
   }
   // Contracts of a market the engine itself holds (its unsettled buys minus its unsettled sells); manual trades are not its to sell.
-  engineHeld(ticker) {
-    const r = this.sql.exec("SELECT SUM(CASE WHEN action='sell' THEN -fill_count ELSE fill_count END) AS q FROM bets WHERE ticker=? AND status IN ('filled','partial','resting') AND fill_count > 0", ticker).toArray()[0];
+  engineHeld(ticker, mode) {
+    const m = mode || (this.settings().shadow ? 'shadow' : 'live');
+    const r = this.sql.exec("SELECT SUM(CASE WHEN action='sell' THEN -fill_count ELSE fill_count END) AS q FROM bets WHERE ticker=? AND status IN ('filled','partial','resting') AND fill_count > 0 AND COALESCE(mode,'live') = ?", ticker, m).toArray()[0];
     return Math.max(0, Number((r && r.q) || 0));
   }
   // Closing-line value for every fill on a game whose closing line is recorded: fair close minus the price paid
@@ -591,6 +753,7 @@ class EngineDO {
     const tz = cfg.timezone || 'America/New_York'; const today = dayIn(tz, now);
     if (hourIn(tz, now) < (cfg.digestHour === undefined ? 9 : cfg.digestHour) || this.kv('digest_day') === today) return;
     this.kv('digest_day', today);
+    this.sql.exec('DELETE FROM games WHERE updated_ts < ? AND id NOT IN (SELECT DISTINCT game_id FROM bets WHERE game_id IS NOT NULL)', now - 30 * DAY); // keep storage small
     const st = this.stats(); const y = (st.days || []).find(d => d.day !== todayKey(now)) || { realized: 0, bets: 0 };
     const clv = (st.clv || []).reduce((a, r) => ({ n: a.n + r.n, s: a.s + r.clv * r.n }), { n: 0, s: 0 });
     const lines = ['Yesterday: ' + (y.realized >= 0 ? '+' : '') + Number(y.realized || 0).toFixed(2) + ' settled, ' + (y.bets || 0) + ' orders',
@@ -598,26 +761,33 @@ class EngineDO {
       clv.n ? 'Closing line (30d): ' + (clv.s / clv.n >= 0 ? '+' : '') + (clv.s / clv.n * 100).toFixed(1) + '¢ over ' + clv.n + ' fills' : 'Closing line: no scored fills yet',
       st.oddsRemaining !== null && st.oddsRemaining !== undefined ? 'Sharp-lines credits left: ' + st.oddsRemaining + (st.runwayDays !== null && st.runwayDays !== undefined ? ' (~' + st.runwayDays + ' days at this pace)' : '') : ''];
     const b = this.brakes(); for (const k in b) lines.push('Paused: ' + k + ' (' + b[k].reason + ')');
-    await this.notify('Edge Desk daily digest', lines.filter(Boolean).join('\n'), 'newspaper');
+    await this.notify('Edge Desk daily digest' + (cfg.shadow ? ' (shadow)' : ''), lines.filter(Boolean).join('\n'), 'newspaper');
+  }
+  flattenShadow() {
+    const n = this.sql.exec("SELECT COUNT(*) AS n FROM bets WHERE mode='shadow' AND status IN ('resting','partial')").toArray()[0].n;
+    this.sql.exec("UPDATE bets SET status = CASE WHEN fill_count > 0 THEN 'filled' ELSE 'cancelled' END, note='flatten' WHERE mode='shadow' AND status IN ('resting','partial')");
+    return n;
   }
   async flatten(cfg) {
+    if (cfg.shadow) return this.flattenShadow();
     const ordRes = await this.kalshi(cfg, 'GET', '/portfolio/orders', { status: 'resting', limit: '200' }, undefined, true);
-    const ours = new Set(this.sql.exec("SELECT order_id FROM bets WHERE status IN ('resting','partial') AND order_id IS NOT NULL").toArray().map(r => r.order_id));
+    const ours = new Set(this.sql.exec("SELECT order_id FROM bets WHERE status IN ('resting','partial') AND order_id IS NOT NULL AND COALESCE(mode,'live') = 'live'").toArray().map(r => r.order_id));
     let n = 0; for (const o of ordRes.orders || []) if (ours.has(o.order_id)) { await this.cancel(cfg, { id: o.order_id, ticker: o.ticker, yes: Number(o.yes_price_dollars || 0) }, 'flatten'); n++; }
     return n;
   }
   stats() {
-    const settled = this.sql.exec("SELECT kind, COUNT(*) AS n, SUM(pnl) AS pnl, SUM(CASE WHEN result = side THEN 1 ELSE 0 END) AS wins, SUM((p_star - CASE WHEN result = side THEN 1 ELSE 0 END) * (p_star - CASE WHEN result = side THEN 1 ELSE 0 END)) AS brier_sum, SUM((p_market - CASE WHEN result = side THEN 1 ELSE 0 END) * (p_market - CASE WHEN result = side THEN 1 ELSE 0 END)) AS brier_mkt, SUM(fill_count * price) AS staked FROM bets WHERE status='settled' AND (action IS NULL OR action='buy') GROUP BY kind").toArray();
-    const exits = this.sql.exec("SELECT COUNT(*) AS n, SUM(pnl) AS pnl, SUM(fill_count) AS contracts FROM bets WHERE status='settled' AND action='sell'").toArray()[0];
-    const methods = this.sql.exec("SELECT COUNT(*) AS n, SUM((p_mult - w) * (p_mult - w)) AS b_mult, SUM((p_pow - w) * (p_pow - w)) AS b_pow FROM (SELECT p_mult, p_pow, CASE WHEN result = side THEN 1.0 ELSE 0.0 END AS w FROM bets WHERE status='settled' AND p_mult IS NOT NULL AND p_pow IS NOT NULL AND (action IS NULL OR action='buy'))").toArray()[0];
-    const open = this.sql.exec("SELECT COUNT(*) AS n, SUM(CASE WHEN action='sell' THEN -fill_count * price ELSE fill_count * price END) AS staked FROM bets WHERE status IN ('filled','partial') AND fill_count > 0").toArray()[0];
-    const resting = this.sql.exec("SELECT COUNT(*) AS n FROM bets WHERE status IN ('resting','partial')").toArray()[0];
-    const days = this.sql.exec('SELECT * FROM daily ORDER BY day DESC LIMIT 30').toArray();
-    const clv = this.sql.exec("SELECT sport, kind, COUNT(*) AS n, AVG(clv) AS clv, AVG(clv_mkt) AS clv_mkt, SUM(CASE WHEN clv > 0 THEN 1 ELSE 0 END) AS beat FROM bets WHERE clv IS NOT NULL AND fill_count > 0 AND ts > ? AND (action IS NULL OR action='buy') GROUP BY sport, kind", Date.now() - 30 * DAY).toArray();
+    const cfg = this.settings(); const mode = cfg.shadow ? 'shadow' : 'live'; const M = "COALESCE(mode,'live') = ?";
+    const settled = this.sql.exec("SELECT kind, COUNT(*) AS n, SUM(pnl) AS pnl, SUM(CASE WHEN result = side THEN 1 ELSE 0 END) AS wins, SUM((p_star - CASE WHEN result = side THEN 1 ELSE 0 END) * (p_star - CASE WHEN result = side THEN 1 ELSE 0 END)) AS brier_sum, SUM((p_market - CASE WHEN result = side THEN 1 ELSE 0 END) * (p_market - CASE WHEN result = side THEN 1 ELSE 0 END)) AS brier_mkt, SUM(fill_count * price) AS staked FROM bets WHERE status='settled' AND (action IS NULL OR action='buy') AND " + M + " GROUP BY kind", mode).toArray();
+    const exits = this.sql.exec("SELECT COUNT(*) AS n, SUM(pnl) AS pnl, SUM(fill_count) AS contracts FROM bets WHERE status='settled' AND action='sell' AND " + M, mode).toArray()[0];
+    const methods = this.sql.exec("SELECT COUNT(*) AS n, SUM((p_mult - w) * (p_mult - w)) AS b_mult, SUM((p_pow - w) * (p_pow - w)) AS b_pow FROM (SELECT p_mult, p_pow, CASE WHEN result = side THEN 1.0 ELSE 0.0 END AS w FROM bets WHERE status='settled' AND p_mult IS NOT NULL AND p_pow IS NOT NULL AND (action IS NULL OR action='buy') AND " + M + ")", mode).toArray()[0];
+    const open = this.sql.exec("SELECT COUNT(*) AS n, SUM(CASE WHEN action='sell' THEN -fill_count * price ELSE fill_count * price END) AS staked FROM bets WHERE status IN ('filled','partial') AND fill_count > 0 AND " + M, mode).toArray()[0];
+    const resting = this.sql.exec("SELECT COUNT(*) AS n FROM bets WHERE status IN ('resting','partial') AND " + M, mode).toArray()[0];
+    const days = this.sql.exec("SELECT * FROM daily WHERE day " + (mode === 'shadow' ? "LIKE '%#s'" : "NOT LIKE '%#s'") + ' ORDER BY day DESC LIMIT 30').toArray().map(d => Object.assign({}, d, { day: d.day.replace(/#s$/, '') }));
+    const clv = this.sql.exec("SELECT sport, kind, COUNT(*) AS n, AVG(clv) AS clv, AVG(clv_mkt) AS clv_mkt, SUM(CASE WHEN clv > 0 THEN 1 ELSE 0 END) AS beat, AVG(CASE WHEN count > 0 THEN COALESCE(fee, 0) / count ELSE 0 END) AS fee_pc FROM bets WHERE clv IS NOT NULL AND fill_count > 0 AND ts > ? AND (action IS NULL OR action='buy') AND " + M + " GROUP BY sport, kind", Date.now() - 30 * DAY, mode).toArray();
     const used = this.kv('odds_used'); const remaining = this.kv('odds_remaining');
     let runwayDays = null;
     if (remaining !== null && used && used.day === todayKey(Date.now()) && used.n > 0) { const hours = Math.max(1, (Date.now() - Date.parse(used.day + 'T00:00:00Z')) / 3600000); const perDay = used.n / hours * 24; runwayDays = perDay > 0 ? Math.round(remaining / perDay) : null; }
-    return { settled, exits, methods, open, resting, days, clv, oddsRemaining: remaining, oddsUsedToday: this.oddsUsedToday(), oddsBudget: oddsBudget(remaining, this.oddsUsedToday()).daily, runwayDays, brakes: this.brakes(), trim: this.modelTrim(this.settings()) };
+    return { mode, settled, exits, methods, open, resting, days, clv, oddsRemaining: remaining, oddsUsedToday: this.oddsUsedToday(), oddsBudget: oddsBudget(remaining, this.oddsUsedToday()).daily, runwayDays, brakes: this.brakes(), trim: this.modelTrim(this.settings()) };
   }
   async ensureAlarm() {
     const cfg = this.settings();
@@ -636,7 +806,7 @@ class EngineDO {
     const has = (k) => !!(env[k] || '').trim();
     const kalshi = cfg.env === 'demo' ? (has('KALSHI_DEMO_KEY_ID') && has('KALSHI_DEMO_PRIVATE_KEY')) : (has('KALSHI_KEY_ID') && has('KALSHI_PRIVATE_KEY'));
     const odds = {}; for (const s in SPORTS) { const oc = this.kv('odds_' + s); if (oc && oc.at) odds[s] = { at: oc.at, events: oc.list.length }; }
-    return { oddsKey: has('ODDS_API_KEY'), kalshiKey: kalshi, ntfy: !!((cfg.ntfyTopic || env.NTFY_TOPIC || '').trim()), alarm: await this.state.storage.getAlarm(), lastTick: this.kv('last_tick'), odds, oddsUsed: this.kv('odds_used'), subMax: this.subMax };
+    return { oddsKey: has('ODDS_API_KEY'), kalshiKey: kalshi, ntfy: !!((cfg.ntfyTopic || env.NTFY_TOPIC || '').trim()), alarm: await this.state.storage.getAlarm(), lastTick: this.kv('last_tick'), odds, oddsUsed: this.kv('odds_used'), subMax: this.subMax, errStreak: this.kv('err_streak') };
   }
   async fetch(request) {
     const url = new URL(request.url);
@@ -644,18 +814,28 @@ class EngineDO {
     const json = (o, s) => new Response(JSON.stringify(o), { status: s || 200, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
     try {
       if (sub === 'cron') { await this.ensureAlarm(); const cfg = this.settings(); const last = this.kv('last_tick'); if (cfg.enabled && (!last || Date.now() - last.ts > 90000)) await this.tick('cron'); return json({ ok: true }); }
-      if (sub === 'status') { const h = await this.health(); return json({ settings: this.settings(), lastTick: h.lastTick, stats: this.stats(), oddsKey: h.oddsKey, kalshiKey: h.kalshiKey, ntfy: h.ntfy, alarm: h.alarm, health: h }); }
-      if (sub === 'settings' && request.method === 'POST') { const patch = await request.json(); delete patch.enabled; const next = this.saveSettings(patch); this.log('info', 'settings changed', patch); return json({ ok: true, settings: next }); }
+      if (sub === 'status') { const h = await this.health(); const cfg = this.settings(); return json({ settings: cfg, mode: cfg.shadow ? 'shadow' : 'live', lastTick: h.lastTick, stats: this.stats(), oddsKey: h.oddsKey, kalshiKey: h.kalshiKey, ntfy: h.ntfy, alarm: h.alarm, health: h }); }
+      if (sub === 'settings' && request.method === 'POST') {
+        const patch = await request.json(); delete patch.enabled; const cur = this.settings();
+        let switched = false;
+        if (patch.shadow !== undefined && !!patch.shadow !== !!cur.shadow) { // changing mode stops the engine and clears the old mode's quotes
+          if (cur.shadow) this.flattenShadow();
+          else if (cur.enabled) { try { await this.flatten(cur); } catch (e) { this.log('error', 'flatten on mode switch failed', { error: e.message }); } }
+          patch.enabled = false; switched = true; await this.state.storage.deleteAlarm();
+        }
+        const next = this.saveSettings(patch); this.log('info', 'settings changed' + (switched ? '; mode is now ' + (next.shadow ? 'shadow' : 'live') + ', engine stopped' : ''), patch);
+        return json({ ok: true, settings: next, switched });
+      }
       if (sub === 'toggle' && request.method === 'POST') {
         const b = await request.json(); const on = !!b.enabled;
         if (on && !(this.env.ODDS_API_KEY || '').trim()) return json({ error: 'ODDS_API_KEY is not set on the Worker' }, 400);
-        if (on) { const h = await this.health(); if (!h.kalshiKey) return json({ error: 'Kalshi API key is not set on the Worker (' + (this.settings().env === 'demo' ? 'KALSHI_DEMO_KEY_ID / KALSHI_DEMO_PRIVATE_KEY' : 'KALSHI_KEY_ID / KALSHI_PRIVATE_KEY') + ')' }, 400); }
-        const next = this.saveSettings({ enabled: on }); this.log('info', on ? 'Engine enabled' : 'Engine disabled');
+        if (on && !this.settings().shadow) { const h = await this.health(); if (!h.kalshiKey) return json({ error: 'Kalshi API key is not set on the Worker (' + (this.settings().env === 'demo' ? 'KALSHI_DEMO_KEY_ID / KALSHI_DEMO_PRIVATE_KEY' : 'KALSHI_KEY_ID / KALSHI_PRIVATE_KEY') + ')' }, 400); }
+        const next = this.saveSettings({ enabled: on }); this.log('info', (on ? 'Engine enabled' : 'Engine disabled') + (next.shadow ? ' (shadow)' : ' (live)'));
         if (on) { await this.state.storage.setAlarm(Date.now() + 1000); } else { await this.state.storage.deleteAlarm(); if (b.flatten) await this.flatten(next); }
         return json({ ok: true, settings: next });
       }
       if (sub === 'tick' && request.method === 'POST') { const cfg = this.settings(); if (!cfg.enabled) return json({ error: 'engine is off' }, 400); const s = await this.tick('manual'); return json({ ok: true, summary: s }); }
-      if (sub === 'preview' && request.method === 'POST') { const cfg = this.settings(); const was = cfg.enabled; this.saveSettings({ enabled: true, takerEnabled: false, makerEnabled: false }); let s; try { s = await this.tick('preview'); } finally { this.saveSettings({ enabled: was, takerEnabled: cfg.takerEnabled, makerEnabled: cfg.makerEnabled }); } return json({ ok: true, summary: s }); }
+      if (sub === 'preview' && request.method === 'POST') { const s = await this.tick('preview', { dry: true, force: true }); return json({ ok: true, summary: s }); }
       if (sub === 'flatten' && request.method === 'POST') { const n = await this.flatten(this.settings()); return json({ ok: true, cancelled: n }); }
       if (sub === 'unbrake' && request.method === 'POST') { const b = await request.json(); const brakes = this.brakes(); if (b.sport && brakes[b.sport]) { delete brakes[b.sport]; this.kv('brakes', brakes); this.log('info', 'Brake released on ' + b.sport + ' by the user'); } return json({ ok: true, brakes }); }
       if (sub === 'games') return json({ games: this.sql.exec('SELECT * FROM games WHERE updated_ts > ? ORDER BY commence_ts ASC', Date.now() - 6 * 3600000).toArray() });
@@ -666,4 +846,4 @@ class EngineDO {
   }
 }
 
-const EdgeDeskEngine = { EngineDO, _internal: { teamMatch, parseEventDate, devig2, devigPower, consensus, confidence, oddsBudget, feeFor, kellyCount, normName, hourIn, dayIn, ENGINE_DEFAULTS, SPORTS } };
+const EdgeDeskEngine = { EngineDO, _internal: { teamMatch, legSide, TEAM_ALIASES, parseEventDate, devig2, devigPower, consensus, confidence, oddsBudget, feeFor, kellyCount, normName, hourIn, dayIn, ENGINE_DEFAULTS, SPORTS } };

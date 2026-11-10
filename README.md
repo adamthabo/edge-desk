@@ -27,6 +27,15 @@ Add three secrets to the Worker (Settings → Variables and Secrets) and the Des
 
 The private key never leaves the Worker: it signs each request there, and the account routes answer only the page served by this Worker, with the password. Orders are sent as price-capped limit orders (fill-or-cancel by default) through Kalshi's V2 order endpoint.
 
+## Money tab: locks and spreads
+
+The landing view lists the small, mostly locked-in plays, sized on your bankroll (or your Kalshi cash, whichever is less):
+
+- **Locks (buy or sell the whole book).** On a one-winner event, buy YES on every outcome when the set costs less than the $1 it must pay (only when the outcomes cover every possibility), or buy NO on every outcome when the set costs less than the legs − 1 dollars it must pay (Kalshi's mutually-exclusive flag). The top three are re-checked against the live order books every 20 seconds while the tab is open, sized through the depth with each fill's fee rounded up to the cent. **Buy it for real** posts to `/desk/book`: the Worker re-reads the event and every order book, refuses if the lock is gone, signs every order before sending any, sends all legs at once (fill-or-cancel at the worst price each leg needs), then sells straight back (reduce-only) any contracts a short leg left unmatched, so what remains is complete sets. Budget: 10% of the bankroll per lock, within the Worker's per-order caps.
+- **Spreads (quote both sides).** Where the gap between the best bid and offer is wide and the market trades, rest a bid 1¢ above the bid and an offer 1¢ below the offer, both post-only. When both fill you keep the gap; if one fills alone you hold that position, so each quote is sized at 2% of the bankroll.
+
+Every play also has a paper button. Not financial advice: locks depend on every leg filling and on Kalshi's settlement rules; spread quotes are not locks until both sides fill.
+
 ## Trading engine (optional, real money)
 
 Desk → Engine runs a "line anchor" strategy inside the Worker (a Durable Object with its own SQLite journal, woken every minute by a cron trigger): it matches Kalshi game markets to sharp sportsbook lines from the-odds-api.com, devigs them into fair probabilities, takes Kalshi's price when it is off by more than fees plus a margin, otherwise rests bids below fair value, pulls quotes before kickoff, holds to settlement, and journals every bet with the probability it believed (Brier score vs the market).

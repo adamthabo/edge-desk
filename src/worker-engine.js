@@ -239,26 +239,35 @@ class EngineDO {
     try { this.sub++; await fetch('https://ntfy.sh/' + encodeURIComponent(topic), { method: 'POST', headers: { 'Title': title, 'Tags': tags || 'chart_with_upwards_trend' }, body: body }); } catch (e) { /* best effort */ }
   }
   /* ---------- Kalshi + odds I/O ---------- */
-  kalshiBase(cfg) {
-    if (this.env.KALSHI_BASE_OVERRIDE) return this.env.KALSHI_BASE_OVERRIDE.replace(/\/+$/, '');
-    return cfg.env === 'demo' ? 'https://external-api.demo.kalshi.co/trade-api/v2' : 'https://external-api.kalshi.com/trade-api/v2';
+  kalshiBases(cfg) {
+    if (this.env.KALSHI_BASE_OVERRIDE) return [this.env.KALSHI_BASE_OVERRIDE.replace(/\/+$/, '')];
+    return cfg.env === 'demo' ? UPSTREAM.demo : UPSTREAM.prod;
   }
   budgetLeft() { return this.subMax - this.sub; }
+  // Same headers as the relay, which Kalshi accepts from a Worker. A 403 from the edge never reached the API, so the other host
+  // is tried; reads also retry on a 5xx or a dropped connection. Orders are never retried on anything else.
   async kalshi(cfg, method, path, query, body, signed) {
-    const base = this.kalshiBase(cfg);
+    const bases = this.kalshiBases(cfg);
     const qs = query && Object.keys(query).length ? '?' + new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== '')).toString() : '';
-    const headers = { 'Accept': 'application/json', 'User-Agent': 'EdgeDesk-Engine/2.0' };
-    if (signed) {
-      const s = await EdgeDeskAccount._internal.signer(this.env, cfg.env === 'demo' ? 'demo' : 'prod');
-      if (!s) throw new Error('no Kalshi API key configured for ' + cfg.env);
-      Object.assign(headers, await s.headers(method, new URL(base).pathname + path));
+    let last = null;
+    for (let i = 0; i < bases.length; i++) {
+      const headers = { 'Accept': 'application/json', 'User-Agent': UA };
+      if (signed) {
+        const sg = await EdgeDeskAccount._internal.signer(this.env, cfg.env === 'demo' ? 'demo' : 'prod');
+        if (!sg) throw new Error('no Kalshi API key configured for ' + cfg.env);
+        Object.assign(headers, await sg.headers(method, new URL(bases[i]).pathname + path));
+      }
+      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      this.sub++;
+      let res;
+      try { res = await fetch(bases[i] + path + qs, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000) }); }
+      catch (e) { if (method === 'GET' && i < bases.length - 1) { last = e; continue; } throw e; }
+      if (i < bases.length - 1 && (res.status === 403 || (method === 'GET' && res.status >= 500))) { last = new Error('Kalshi ' + res.status + ' ' + path); continue; }
+      const text = await res.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { raw: text }; }
+      if (!res.ok) { const e = data && (data.error || data); throw new Error('Kalshi ' + res.status + ' ' + path + ': ' + ((e && (e.message || e.code)) || text.slice(0, 120))); }
+      return data;
     }
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
-    this.sub++;
-    const res = await fetch(base + path + qs, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000) });
-    const text = await res.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { raw: text }; }
-    if (!res.ok) { const e = data && (data.error || data); throw new Error('Kalshi ' + res.status + ' ' + path + ': ' + ((e && (e.message || e.code)) || text.slice(0, 120))); }
-    return data;
+    throw last || new Error('Kalshi unreachable');
   }
   async fetchOdds(cfg, sportKey) {
     const key = (this.env.ODDS_API_KEY || '').trim(); if (!key) throw new Error('ODDS_API_KEY not set on the Worker');

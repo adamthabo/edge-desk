@@ -304,6 +304,16 @@ details.rules p { white-space: pre-wrap; font-size: 13px; color: var(--fg-2); li
 .decide-a { color: var(--fg-2); margin-top: 4px; padding-left: 26px; }
 .guide .layer-d { margin-top: 6px; }
 
+/* money */
+.banner.good { border-color: var(--up); background: var(--up-soft); }
+.card.money { gap: 8px; }
+.money-amt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; }
+.money-amt b { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.money-live { font-size: 12.5px; color: var(--fg-2); }
+.money-live.ok::before, .money-live.gone::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--up); }
+.money-live.gone::before { background: var(--fg-2); opacity: .5; }
+.money-real:empty { display: none; }
+
 /* verdicts */
 .verdict { display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-right: 4px; vertical-align: 1px; font-stretch: 90%; }
 .verdict.do { background: var(--up-soft); color: var(--up); }

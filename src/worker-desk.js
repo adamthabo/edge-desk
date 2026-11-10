@@ -9,6 +9,9 @@
  *   MAX_ORDER_CONTRACTS     optional per-order cap (default 100)
  *   MAX_ORDER_DOLLARS       optional per-order cap on money at risk (default 100)
  *
+ * POST /desk/book buys every leg of a one-winner book in one go (see buyBook): fresh order books decide the size and prices,
+ * all legs go out together as fill-or-cancel orders, and anything a short leg leaves unmatched is sold straight back.
+ *
  * The key never leaves the Worker: it signs each request to Kalshi here. Only same-origin requests
  * (the page this Worker serves) carrying the desk password are accepted.
  */
@@ -147,14 +150,27 @@ async function deskRoute(request, env, url, bases, cors, isSameOrigin) {
   try { s = await signer(env, which); } catch (e) { return json({ error: 'could not read the ' + which + ' private key: ' + e.message }, 500); }
   if (!s) return json({ error: 'no Kalshi API key configured for the ' + which + ' exchange' }, 503);
 
-  const call = async (method, path, query, body) => {
+  const hosts = which === 'demo' ? bases.demo : bases.prod;
+  // Same headers as the relay, which Kalshi accepts from a Worker. A 403 from the edge never reached the API, so the other
+  // host is tried; reads also retry on a 5xx or a dropped connection. Orders are never retried on anything else.
+  const send = async (method, path, query, body, signed) => {
     const qs = query && Object.keys(query).length ? '?' + new URLSearchParams(query).toString() : '';
-    const headers = Object.assign({ 'Accept': 'application/json', 'User-Agent': 'EdgeDesk/1.0' }, await s.headers(method, basePath + path));
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
-    const res = await fetch(base + path + qs, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-    const data = await readJson(res);
-    return { status: res.status, ok: res.status >= 200 && res.status < 300, data };
+    let last = null;
+    for (let i = 0; i < hosts.length; i++) {
+      const headers = Object.assign({ 'Accept': 'application/json', 'User-Agent': UA }, signed || {});
+      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      let res;
+      try { res = await fetch(hosts[i] + path + qs, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000) }); }
+      catch (e) { if (method === 'GET' && i < hosts.length - 1) { last = e; continue; } throw e; }
+      if (i < hosts.length - 1 && (res.status === 403 || (method === 'GET' && res.status >= 500))) { last = res; continue; }
+      const data = await readJson(res);
+      return { status: res.status, ok: res.status >= 200 && res.status < 300, data };
+    }
+    throw (last instanceof Error ? last : new Error('Kalshi unreachable'));
   };
+  const call = async (method, path, query, body) => send(method, path, query, body, await s.headers(method, basePath + path));
+  const pub = (path, query) => send('GET', path, query);
+  const post = (path, body, signed) => send('POST', path, null, body, signed);
 
   try {
     if (request.method === 'GET' && DESK_ALLOW_GET[sub]) {
@@ -171,6 +187,11 @@ async function deskRoute(request, env, url, bases, cors, isSameOrigin) {
       if (!r.ok) return json({ error: kalshiError(r.status, r.data) }, r.status >= 400 && r.status < 600 ? r.status : 502);
       return json({ ok: true, sent: { ticker: o.ticker, side: t.side, action: t.action, count: t.count, limit: t.limit, tif: t.body.time_in_force, risk: Number(t.risk.toFixed(2)) }, result: r.data });
     }
+    if (request.method === 'POST' && sub === 'book') {
+      let o; try { o = await request.json(); } catch (e) { return json({ error: 'bad JSON' }, 400); }
+      const r = await buyBook(o, { pub, post, s, basePath, lim });
+      return json(r.body, r.status);
+    }
     if (request.method === 'DELETE' && /^order\/[A-Za-z0-9_-]+$/.test(sub)) {
       const id = sub.slice(6);
       const q = { exchange_index: '-1' };
@@ -185,4 +206,89 @@ async function deskRoute(request, env, url, bases, cors, isSameOrigin) {
   }
 }
 
-const EdgeDeskAccount = { deskRoute, _internal: { toV2Order, pkcs1ToPkcs8, parsePem, importSigningKey, signer, sameSecret, limits } };
+// Buy one contract on every leg of a one-winner book, as many complete sets as lock a profit right now.
+//   1. The event must carry Kalshi's one-winner flag, every leg must be open, and a YES book must be all of the event's outcomes
+//      and cover every possibility (a NO book only needs the flag: at most one leg can settle YES).
+//   2. Fresh order books size it (EDMoney.bookPlan): the most profitable number of sets within the budget, the per-order caps,
+//      the depth on every leg and a minimum lock per set.
+//   3. Every order is signed before any is sent, then all legs go out at once, fill-or-cancel at the worst price that leg needs.
+//   4. If some legs filled more than others, the extra contracts are sold straight back (reduce-only, fill-or-cancel, priced to
+//      fill): what is left is complete sets and nothing unhedged.
+async function buyBook(o, ctx) {
+  const bad = (msg) => ({ status: 400, body: { error: msg } });
+  const gone = (msg, extra) => ({ status: 409, body: Object.assign({ error: msg, gone: true }, extra || {}) });
+  const side = o && o.side === 'no' ? 'no' : 'yes';
+  const tickers = Array.isArray(o && o.tickers) ? o.tickers.filter(t => typeof t === 'string' && t && t.length <= 80) : [];
+  if (!o || typeof o.event !== 'string' || !o.event || o.event.length > 80) return bad('event missing');
+  if (tickers.length < 2 || tickers.length > 10 || new Set(tickers).size !== tickers.length) return bad('a book needs 2 to 10 different legs');
+  const maxSets = Math.min(ctx.lim.contracts, Math.floor(Number(o.maxSets)));
+  if (!(maxSets >= 1)) return bad('maxSets must be 1 or more');
+  const maxCost = Number(o.maxCost); if (!(maxCost > 0)) return bad('maxCost must be above zero');
+  const minEdge = Math.max(0.002, Math.min(0.5, Number(o.minEdge) || 0.005));
+  const N = EDMoney.num;
+  // 1) the event
+  const evr = await ctx.pub('/events/' + encodeURIComponent(o.event), { with_nested_markets: 'true' });
+  if (!evr.ok) return { status: 502, body: { error: 'could not load the event: ' + kalshiError(evr.status, evr.data) } };
+  const ev = evr.data.event || evr.data;
+  const markets = (ev.markets && ev.markets.length ? ev.markets : evr.data.markets) || [];
+  if (!ev.mutually_exclusive) return gone('Kalshi does not mark this event as one-winner, so buying every leg is not a lock');
+  const open = markets.filter(m => (!m.status || m.status === 'active' || m.status === 'open') && (m.market_type || 'binary') === 'binary');
+  const openSet = new Set(open.map(m => m.ticker));
+  if (tickers.some(t => !openSet.has(t))) return gone('a leg is no longer open on Kalshi');
+  if (side === 'yes') {
+    if (open.length !== tickers.length) return gone('the event now has ' + open.length + ' open outcomes, not ' + tickers.length + '; an unlisted one could win');
+    const cov = EDMoney.covers(open.map(m => m.yes_sub_title || m.title || ''), open.map(m => m.strike_type || ''));
+    if (!cov.ok) return gone('not a lock: ' + cov.why);
+  }
+  // 2) the fee rate (an event override wins over the series) and fresh order books
+  let mult = N(ev.fee_multiplier_override);
+  if (mult === null) { try { const sr = await ctx.pub('/series/' + encodeURIComponent(ev.series_ticker || o.event.split('-')[0])); const se = sr.ok ? (sr.data.series || sr.data) : {}; mult = N(se.fee_multiplier); } catch (e) { /* default */ } }
+  const feeRate = 0.07 * (mult === null ? 1 : mult);
+  const books = await Promise.all(tickers.map(t => ctx.pub('/markets/' + encodeURIComponent(t) + '/orderbook', { depth: '30' })));
+  const badBook = books.findIndex(b => !b.ok);
+  if (badBook >= 0) return { status: 502, body: { error: 'could not load the order book for ' + tickers[badBook] } };
+  const parsed = books.map(b => EDMoney.parseBook(b.data));
+  const legs = tickers.map((t, i) => ({ ticker: t, levels: side === 'yes' ? parsed[i].yesAsks : parsed[i].noAsks }));
+  const payoutPerSet = side === 'yes' ? 1 : tickers.length - 1;
+  const plan = EDMoney.bookPlan(legs, { payout: payoutPerSet, feeRate, minEdge, maxSets, maxCost, perOrder: ctx.lim });
+  if (!plan.sets) return gone('the lock is gone: ' + plan.reason, { plan });
+  if (o.dryRun) return { status: 200, body: { ok: true, dryRun: true, side, plan } };
+  // 3) sign everything, then send every leg at once
+  const orders = plan.legs.map(l => toV2Order({ ticker: l.ticker, side, action: 'buy', count: plan.sets, limit: l.limit, tif: 'ioc' }, ctx.lim));
+  const blocked = orders.find(t => t.error); if (blocked) return bad(blocked.error);
+  const path = '/portfolio/events/orders';
+  const heads = []; for (let i = 0; i < orders.length; i++) heads.push(await ctx.s.headers('POST', ctx.basePath + path));
+  const sent = await Promise.all(orders.map((t, i) => ctx.post(path, t.body, heads[i]).catch(e => ({ ok: false, status: 0, data: { error: { message: e.message } } }))));
+  // fill counts are unambiguous; prices are reported from the books just read (a fill-or-cancel order at the limit can only do
+  // as well or better), so the report never depends on which side of the book Kalshi quotes a fill price in
+  const fillsOf = (r) => { const d = r && r.ok ? (r.data.order || r.data) : null; return d ? Math.max(0, Math.floor(N(d.fill_count_fp) ?? N(d.fill_count) ?? 0)) : 0; };
+  const filled = sent.map(fillsOf);
+  const sets = Math.min.apply(null, filled);
+  // 4) sell back what a short leg left unmatched
+  const extra = filled.map(f => f - sets);
+  const unwind = [];
+  for (let i = 0; i < tickers.length; i++) {
+    if (extra[i] <= 0) continue;
+    const bids = side === 'yes' ? parsed[i].yesBids : parsed[i].noBids;
+    const bid = bids.length ? bids[0][0] : 0.01;
+    const limit = Math.max(0.01, Math.round((bid - 0.03) * 100) / 100);
+    const t = toV2Order({ ticker: tickers[i], side, action: 'sell', count: extra[i], limit, tif: 'ioc' }, { contracts: Infinity, dollars: Infinity }); // reduce-only: it can only close what was just bought
+    unwind.push({ i, t, bid, h: await ctx.s.headers('POST', ctx.basePath + path) });
+  }
+  const unwound = await Promise.all(unwind.map(u => ctx.post(path, u.t.body, u.h).catch(e => ({ ok: false, status: 0, data: { error: { message: e.message } } }))));
+  // 5) the report
+  let cost = 0, fees = 0, unwindPnl = 0, left = 0;
+  const legsOut = tickers.map((t, i) => {
+    const pl = plan.legs[i], feeEach = pl.fee / plan.sets;
+    const u = unwind.findIndex(x => x.i === i), ur = u >= 0 ? unwound[u] : null;
+    const sold = ur ? fillsOf(ur) : 0, soldAt = u >= 0 ? unwind[u].bid : null;
+    cost += pl.avg * sets; fees += feeEach * sets;
+    if (sold) unwindPnl += sold * (soldAt - pl.avg) - feeEach * sold - EDMoney.takerFee(sold, soldAt, feeRate);
+    left += Math.max(0, extra[i] - sold);
+    return { ticker: t, limit: pl.limit, avg: pl.avg, filled: filled[i], extra: extra[i], sold, soldAt, error: sent[i].ok ? '' : kalshiError(sent[i].status, sent[i].data), unwindError: ur && !ur.ok ? kalshiError(ur.status, ur.data) : '' };
+  });
+  const locked = sets * payoutPerSet - cost - fees;
+  return { status: 200, body: { ok: true, side, sets, planned: plan.sets, payout: sets * payoutPerSet, cost, fees, locked, unwindPnl, unhedged: left, legs: legsOut, plan } };
+}
+
+const EdgeDeskAccount = { deskRoute, _internal: { toV2Order, pkcs1ToPkcs8, parsePem, importSigningKey, signer, sameSecret, limits, buyBook } };

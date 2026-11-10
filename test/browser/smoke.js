@@ -27,6 +27,24 @@ const assert = (cond, msg) => { if (!cond) { errors.push('ASSERT: ' + msg); cons
   assert(S.mode === 'sim', 'falls back to sim mode when fetch fails (mode=' + S.mode + ')');
   assert(S.universe.markets.size > 40, 'sim universe loaded (' + S.universe.markets.size + ' markets)');
   assert(S.scanner.ops.length > 0, 'scanner produced ops (' + S.scanner.ops.length + ')');
+  // Money is the landing view: locks and spreads, checked against the order books, with paper buttons
+  assert(S.view === 'money' && !$('view-money').hidden && $('view-scanner').hidden, 'Money is the landing view');
+  assert($('money-locks').querySelectorAll('.card.money').length > 0, 'lock cards render (' + $('money-locks').querySelectorAll('.card.money').length + ')');
+  assert(/Locks now/.test($('money-tiles').textContent) && /Spreads to quote/.test($('money-tiles').textContent), 'money tiles render');
+  const firstLock = $('money-locks').querySelector('.card.money');
+  assert(/(Buy|Sell) the book/.test(firstLock.textContent) && /(locked|right now)/.test(firstLock.textContent) && /My call/.test(firstLock.textContent), 'lock card shows the play, the money and the call');
+  assert(!$('money-locks').querySelector('[data-act="mreal"]'), 'no real-money button on simulated data');
+  await sleep(700);
+  assert(window.EDMoneyState.checks.size >= 1, 'top locks checked against the order books (' + window.EDMoneyState.checks.size + ')');
+  assert(/on the live books/.test($('money-locks').textContent), 'live-check status shown on the cards');
+  const cash0 = S.desk.cash;
+  $('money-locks').querySelector('[data-act="mpaperl"]:not([disabled])').click(); await sleep(30);
+  assert(S.desk.cash < cash0 && Object.keys(S.desk.positions).length >= 2, 'paper lock buys every leg (' + Object.keys(S.desk.positions).length + ' positions)');
+  const sq = $('money-spreads').querySelector('[data-act="mpaperq"]');
+  if (sq) { const before = S.desk.orders.length; sq.click(); await sleep(30); assert(S.desk.orders.length === before + 2 && S.desk.orders.some(o => o.side === 'yes') && S.desk.orders.some(o => o.side === 'no'), 'paper quote rests a bid and an offer'); }
+  else console.log('note: no spreads in this sim run');
+  App.Desk.reset(S.settings.bankroll); await sleep(10);
+  UI.nav('scanner'); await sleep(50);
   assert($('scanner-list').children.length > 0, 'scanner cards rendered (' + $('scanner-list').children.length + ')');
   assert(/Simulated/.test($('st-source').textContent), 'status shows simulated');
   const kinds = new Set(S.scanner.ops.map(o => o.kind));
@@ -124,7 +142,7 @@ const assert = (cond, msg) => { if (!cond) { errors.push('ASSERT: ' + msg); cons
   assert(/My read of the board/.test($('scanner-read').textContent), 'board read line renders');
   const verdicts = Array.from(window.document.querySelectorAll('#scanner-list .verdict')).map(v => v.className.replace('verdict ', ''));
   const order = verdicts.map(v => ({ do: 0, maybe: 1, skip: 2 })[v]); assert(order.every((r, i) => i === 0 || r >= order[i - 1]), 'cards sorted Do it → Maybe → Skip (' + verdicts.join(',') + ')');
-  const firstCard = window.document.querySelector('#scanner-list .card .layer-do').textContent; assert(/Buy (NO|YES) on all \d+ outcomes|Skip|Only|Do not cross|Nothing to do/.test(firstCard), 'first verdict is a concrete instruction: ' + firstCard.slice(0, 90));
+  const firstCard = window.document.querySelector('#scanner-list .card .layer-do').textContent; assert(/Buy (NO|YES) on all \d+ outcomes|Quote both sides|Skip|Only|Do not cross|Nothing to do/.test(firstCard), 'first verdict is a concrete instruction: ' + firstCard.slice(0, 90));
   const kb = window.document.querySelector('.kindbtn'); kb.click(); await sleep(20);
   assert(!$('pop').hidden && $('pop').textContent.includes('How it pays'), 'kind popover explains how it pays/loses');
   window.document.body.click(); await sleep(20); assert($('pop').hidden, 'popover closes on outside click');

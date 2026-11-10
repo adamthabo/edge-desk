@@ -304,6 +304,16 @@ details.rules p { white-space: pre-wrap; font-size: 13px; color: var(--fg-2); li
 .decide-a { color: var(--fg-2); margin-top: 4px; padding-left: 26px; }
 .guide .layer-d { margin-top: 6px; }
 
+/* money */
+.banner.good { border-color: var(--up); background: var(--up-soft); }
+.card.money { gap: 8px; }
+.money-amt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; }
+.money-amt b { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.money-live { font-size: 12.5px; color: var(--fg-2); }
+.money-live.ok::before, .money-live.gone::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--up); }
+.money-live.gone::before { background: var(--fg-2); opacity: .5; }
+.money-real:empty { display: none; }
+
 /* verdicts */
 .verdict { display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-right: 4px; vertical-align: 1px; font-stretch: 90%; }
 .verdict.do { background: var(--up-soft); color: var(--up); }
@@ -410,7 +420,17 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
 </header>
 
 <main id="main">
-  <section class="view" id="view-scanner">
+  <section class="view" id="view-money" hidden>
+    <div id="money-banner"></div>
+    <div class="view-head"><h2>Money</h2><span class="sub" id="money-sub">Small, mostly locked-in plays</span></div>
+    <div class="section-hint" id="money-hint"></div>
+    <div class="tiles" id="money-tiles"></div>
+    <div class="section"><h3>Locks: buy or sell the whole book</h3><div class="section-hint" id="money-locks-hint"></div><div id="money-locks" class="cards"></div></div>
+    <div class="section"><h3>Spreads: quote both sides</h3><div class="section-hint" id="money-spreads-hint"></div><div id="money-spreads" class="cards"></div></div>
+    <div class="disclaimer">Locks pay out at settlement and depend on every leg filling and on Kalshi's rules (a voided market breaks a set). Spread quotes earn the gap only when both sides fill. Prices come from the live order books and change by the second; Edge Desk re-checks before anything real is sent. Not financial advice.</div>
+  </section>
+
+  <section class="view" id="view-scanner" hidden>
     <div id="scanner-banner"></div>
     <div id="scanner-primer"></div>
     <div class="view-head"><h2>Scanner</h2><span class="sub" id="scanner-sub">Opportunities across the loaded market universe</span></div>
@@ -471,7 +491,8 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
 
 <nav id="nav" aria-label="Views">
   <div class="navbrand brand"><h1>Edge Desk</h1></div>
-  <button data-nav="scanner" class="on"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>Scanner</span></button>
+  <button data-nav="money" class="on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15 9.4c-.6-.9-1.7-1.4-3-1.4-1.7 0-3 .9-3 2.1 0 2.9 6 1.6 6 4.6 0 1.3-1.3 2.2-3 2.2-1.4 0-2.6-.6-3.1-1.5M12 6.4v11.2"/></svg><span>Money</span></button>
+  <button data-nav="scanner"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>Scanner</span></button>
   <button data-nav="markets"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Markets</span></button>
   <button data-nav="tape"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h13"/><circle cx="19" cy="12" r="1.5"/></svg><span>Tape</span></button>
   <button data-nav="desk"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M8 15h4"/></svg><span>Desk</span></button>
@@ -498,6 +519,105 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
   </div>
 </div>
 <div class="pop" id="pop" hidden role="tooltip"></div>
+<script>
+/*
+ * Edge Desk — small-money plays, shared by the page and the Worker.
+ *
+ * A book lock buys one contract on every leg of a one-winner event for less than the set is guaranteed to pay:
+ *   YES on every leg pays exactly $1 when one leg must win (the outcomes cover everything);
+ *   NO on every leg pays at least $(legs − 1) when at most one leg can win (Kalshi's mutually-exclusive flag).
+ * bookPlan sizes it against real order-book depth with per-fill fees, so the page's preview and the Worker's execution
+ * agree on how many sets are worth buying and at what prices.
+ */
+const EDMoney = (function () {
+  'use strict';
+  const num = (v) => { if (v === null || v === undefined || v === '') return null; const n = typeof v === 'number' ? v : parseFloat(v); return Number.isFinite(n) ? n : null; };
+  const r4 = (v) => Math.round(v * 10000) / 10000;
+
+  // Kalshi order book → levels in dollars, best first. Buying YES at p meets a NO bid at 1 − p, so YES asks come from NO bids.
+  function parseBook(res) {
+    const ob = (res && (res.orderbook_fp || res.orderbook)) || {};
+    const parse = (arr, scale) => (arr || []).map(x => [num(x[0]), num(x[1])]).filter(x => x[0] !== null && x[1] !== null && x[1] > 0).map(x => [scale ? x[0] / scale : x[0], x[1]]);
+    let yesBids, noBids;
+    if (ob.yes_dollars || ob.no_dollars) { yesBids = parse(ob.yes_dollars); noBids = parse(ob.no_dollars); }
+    else { yesBids = parse(ob.yes, 100); noBids = parse(ob.no, 100); }
+    yesBids.sort((a, b) => b[0] - a[0]); noBids.sort((a, b) => b[0] - a[0]);
+    return {
+      yesBids, noBids,
+      yesAsks: noBids.map(x => [r4(1 - x[0]), x[1]]).sort((a, b) => a[0] - b[0]),
+      noAsks: yesBids.map(x => [r4(1 - x[0]), x[1]]).sort((a, b) => a[0] - b[0])
+    };
+  }
+
+  // Kalshi's taker fee on one fill: rate × C × P × (1 − P), rounded up to the cent (the conservative end of the rounding).
+  function takerFee(count, price, rate) {
+    if (!(count > 0) || !(rate > 0)) return 0;
+    return Math.ceil(rate * count * price * (1 - price) * 100 - 1e-9) / 100;
+  }
+
+  // The most profitable number of complete sets. legs: [{ ticker, levels: [[price, size], …] cheapest first }].
+  // opts: payout (dollars one set is guaranteed), feeRate, minEdge (dollars a set must clear), maxSets, maxCost (dollars),
+  // perOrder ({ contracts, dollars }: the Worker's per-order caps). Returns sets = 0 with a reason when nothing locks.
+  function bookPlan(legs, opts) {
+    const o = opts || {};
+    const payout = o.payout, rate = o.feeRate === undefined ? 0.07 : o.feeRate, minEdge = o.minEdge === undefined ? 0.005 : o.minEdge;
+    const maxSets = Math.max(0, Math.min(5000, Math.floor(o.maxSets || 0))), maxCost = o.maxCost === undefined ? Infinity : o.maxCost;
+    const per = o.perOrder || { contracts: Infinity, dollars: Infinity };
+    const best = legs.map(l => (l.levels && l.levels.length ? l.levels[0][0] : null));
+    const bestSum = best.every(p => p !== null) ? r4(best.reduce((s, p) => s + p, 0)) : null;
+    const walk = (levels, qty) => {
+      let left = qty, cost = 0, fee = 0, worst = null;
+      for (const [p, s] of levels) { if (left <= 0) break; const q = Math.min(left, s); cost += q * p; fee += takerFee(q, p, rate); worst = p; left -= q; }
+      return left > 0 ? null : { cost, fee, worst };
+    };
+    let plan = null, stop = '';
+    if (bestSum === null) stop = 'a leg has nothing offered';
+    for (let S = 1; S <= maxSets && bestSum !== null; S++) {
+      const fills = legs.map(l => walk(l.levels, S));
+      if (fills.some(f => f === null)) { stop = 'not enough offered on every leg for more'; break; }
+      if (S > per.contracts) { stop = 'the per-order cap of ' + per.contracts + ' contracts'; break; }
+      if (fills.some(f => S * f.worst > per.dollars + 1e-9)) { stop = 'the per-order cap of $' + Number(per.dollars).toFixed(2); break; }
+      const cost = fills.reduce((s, f) => s + f.cost, 0), fees = fills.reduce((s, f) => s + f.fee, 0);
+      if (cost + fees > maxCost + 1e-9) { stop = 'the budget of $' + Number(maxCost).toFixed(2); break; }
+      const profit = S * payout - cost - fees;
+      // fees round up per fill, so a few sets can lock less per set than more of them: keep looking past a miss
+      if (profit >= minEdge * S - 1e-9 && (!plan || profit > plan.profit + 1e-9)) plan = { sets: S, cost, fees, profit, fills };
+    }
+    if (!plan) {
+      let reason = stop || 'nothing to buy';
+      if (bestSum !== null) {
+        const one = legs.map(l => walk(l.levels, 1));
+        if (one.every(Boolean)) {
+          const c1 = one.reduce((s, f) => s + f.cost + f.fee, 0);
+          reason = 'one set costs ' + (c1 * 100).toFixed(1) + '¢ with fees and pays ' + (payout * 100).toFixed(0) + '¢' + (c1 < payout ? ', under the ' + (minEdge * 100).toFixed(1) + '¢ a set worth sending' : '');
+        }
+      }
+      return { sets: 0, reason, bestSum, payoutPerSet: payout };
+    }
+    return {
+      sets: plan.sets, cost: plan.cost, fees: plan.fees, payout: plan.sets * payout, payoutPerSet: payout, profit: plan.profit, perSet: plan.profit / plan.sets,
+      bestSum, limitedBy: stop,
+      legs: legs.map((l, i) => ({ ticker: l.ticker, limit: plan.fills[i].worst, cost: plan.fills[i].cost, fee: plan.fills[i].fee, avg: plan.fills[i].cost / plan.sets }))
+    };
+  }
+
+  // Do one-winner legs cover every possible outcome? A catch-all leg ("Other", "None of the above") or numeric buckets with
+  // both open ends ("48° or below" … "57° or above"). A list of candidates without a catch-all is not a lock for YES.
+  const CATCHALL_RE = /\b(other|another|someone else|anyone else|none of|no one|nobody|neither|the field|any other|not listed)\b/i;
+  const LOW_RE = /\b(or below|or lower|or less|or fewer|or under|below|under|less than|at most)\b/i;
+  const HIGH_RE = /\b(or above|or higher|or more|or over|above|over|more than|greater than|at least)\b/i;
+  function covers(names, strikeTypes) {
+    const st = strikeTypes || [];
+    if (names.some(n => CATCHALL_RE.test(n || ''))) return { ok: true, why: 'a catch-all leg covers every other outcome' };
+    if (st.some(s => s === 'less' || s === 'less_or_equal') && st.some(s => s === 'greater' || s === 'greater_or_equal')) return { ok: true, why: 'the buckets run from an open low end to an open high end' };
+    if (names.some(n => LOW_RE.test(n || '')) && names.some(n => HIGH_RE.test(n || ''))) return { ok: true, why: 'the buckets run from an open low end to an open high end' };
+    return { ok: false, why: 'the listed outcomes are not exhaustive; an unlisted outcome can win' };
+  }
+
+  return { parseBook, takerFee, bookPlan, covers, num };
+})();
+if (typeof window !== 'undefined') window.EDMoney = EDMoney;
+</script>
 <script>
 /* Edge Desk core: pure functions (no DOM). Exposed as window.ED for the page and module.exports for tests. */
 (function (root) {
@@ -914,7 +1034,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
           const score = spread * 100 * Math.log10(10 + m.vol24);
           out.push({
             kind: 'spread', score: score, tickers: [m.ticker], event: m.event, title: label,
-            spread: spread, yb: m.yb, ya: m.ya, vol24: m.vol24,
+            spread: spread, yb: m.yb, ya: m.ya, vol24: m.vol24, makerRate: makerRate, days: days,
             headline: 'Spread ' + U.cents(spread) + ' wide (' + U.cents(m.yb) + ' / ' + U.cents(m.ya) + ')',
             math: 'A resting bid at ' + U.cents(m.yb + 0.01) + ' and an offer at ' + U.cents(m.ya - 0.01) + ' still improve both sides by 1¢ and keep ' + U.cents(spread - 0.02) + ' between them. 24h volume ' + U.compact(m.vol24) + '. ' + (makerRate > 0 ? 'This series charges maker fees (' + (makerRate * 100).toFixed(2) + '% × P × (1−P)).' : 'Resting orders pay no fee on this series.'),
             note: 'You only earn the spread if both sides fill; a one-sided fill leaves you with a position. Adverse selection is the real cost here.'
@@ -1378,9 +1498,11 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
       return maybe('Only if you can say, in one sentence, why ' + other + ' is really a ' + pc(1 - o.price) + ' shot. If you can: buy ' + n + ' ' + o.side.toUpperCase() + ' at ' + c(o.price) + ' (' + m(n * o.cost) + ', 2% of bankroll). A miss costs all of it, so never more than that.');
     }
     if (o.kind === 'spread') {
-      const bid = o.yb + 0.01; const n = Math.floor((B * 0.01) / bid);
-      if (n < 1) return skip('Too small to matter at your bankroll. Do not cross a ' + c(o.spread) + ' spread for any reason.');
-      return maybe('Do not cross it. If you want this market, rest a bid for ' + n + ' YES at ' + c(bid) + ' (' + m(n * bid) + ', 1% of bankroll) and let the market come to you; cancel it if it has not filled by the close. Earn the spread, never pay it.');
+      const sp = spreadPlan(o, settings);
+      if (sp.n < 1 || sp.keep < 0.05) return skip('Too small to matter at your bankroll. Never cross a ' + c(o.spread) + ' spread: that pays it instead of earning it.');
+      const text = 'Quote both sides: rest a bid for ' + sp.n + ' YES at ' + c(sp.bid) + ' and an offer for ' + sp.n + ' at ' + c(sp.ask) + ' (buying NO at ' + c(1 - sp.ask) + '). Both only wait on the book. If both fill you keep ' + m(sp.keep) + ' (' + c(sp.keepPer) + ' a pair); if only one fills you hold ' + sp.n + ' contracts at that price, which is why it stays this small.';
+      const good = o.spread >= 0.06 && (o.vol24 || 0) >= 100 && o.yb >= 0.10 && o.ya <= 0.90 && (o.days === null || o.days === undefined || o.days >= 1) && sp.keep >= 0.3;
+      return good ? { stance: 'do', label: 'Do it, small', text } : maybe(text + (o.days !== null && o.days !== undefined && o.days < 1 ? ' It closes within a day, when prices jump on news; leave it unless you are watching.' : ''));
     }
     if (o.kind === 'mover') return skip('A ' + c(Math.abs(o.delta)) + ' jump in a day means news, and the people who moved it already know it. Unless you can name the news and judge it better than they did, there is nothing here for you.');
     if (o.kind === 'volume') return skip('Nothing to do. Heavy trading means this price is probably fair. Useful for picking markets to watch, not for betting.');
@@ -1391,7 +1513,19 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
     }
     return skip('No rule for this signal yet.');
   }
+  // Spread capture: rest a bid 1¢ above the best bid and an offer 1¢ below the best offer. Both filling keeps the gap between them
+  // (less any maker fees); while resting, each pair holds about $1 minus the gap. Sized to 2% of the bankroll, at most 50 a side.
+  function spreadPlan(o, settings) {
+    const B = Math.max(50, (settings && settings.bankroll) || 500), share = 0.02;
+    const bid = Math.round((o.yb + 0.01) * 100) / 100, ask = Math.round((o.ya - 0.01) * 100) / 100;
+    const gap = Math.max(0, Math.round((ask - bid) * 10000) / 10000), perPair = bid + (1 - ask);
+    const n = gap > 0 ? Math.max(0, Math.min(50, Math.floor((B * share) / Math.max(0.05, perPair)))) : 0;
+    const fee = o.makerRate ? o.makerRate * (bid * (1 - bid) + ask * (1 - ask)) : 0;
+    const keepPer = Math.max(0, gap - fee);
+    return { bid, ask, gap, n, share, perPair, capital: n * perPair, keepPer, keep: n * keepPer, rank: keepPer * Math.log10(10 + (o.vol24 || 0)) };
+  }
   const P = {
+    spreadPlan: spreadPlan,
     GLOSSARY: GLOSSARY,
     KIND_PLAIN: KIND_PLAIN,
     KIND_DO: KIND_DO,
@@ -1569,7 +1703,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
     watch: new Set(),
     desk: null,
     seriesCache: {},
-    view: 'scanner',
+    view: 'money',
     sel: null,
     sheet: { book: null, trades: [], candles: [], range: '1W', candlesAt: 0, ai: null, aiBusy: false, calcQ: null, ticket: { side: 'yes', type: 'market', qty: 10, price: null } },
     ai: null,                // sample() or null
@@ -2482,6 +2616,11 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
       this.refresh().catch(() => { /* shown in panel */ });
       return r;
     },
+    // Buy every leg of a one-winner book through the Worker (fresh books, all legs at once, extras sold back).
+    async book(body) {
+      try { return await this.req('book', { method: 'POST', body, timeout: 45000 }); }
+      finally { this.refresh().catch(() => { /* shown in panel */ }); }
+    },
     async cancel(order) {
       const r = await this.req('order/' + encodeURIComponent(order.id), { method: 'DELETE', query: { ticker: order.ticker } });
       this.refresh().catch(() => { /* shown in panel */ });
@@ -2512,7 +2651,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
   const T = (key, text) => P.term(key, text);
   const cssEsc = (s) => (window.CSS && typeof window.CSS.escape === 'function') ? window.CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&');
   const KINDS = { arb: 'Book arbitrage', yield: 'Near-certain yield', spread: 'Wide spread', mover: 'Mover', volume: 'Volume surge', longshot: 'Longshot zone' };
-  const VIEWS = ['scanner', 'markets', 'tape', 'desk', 'setup'];
+  const VIEWS = ['money', 'scanner', 'markets', 'tape', 'desk', 'setup'];
 
   const UI = window.UI = {
     mk: { search: '', sort: 'vol24', cat: 'all', watchOnly: false, limit: 80 },
@@ -2548,7 +2687,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
     },
     /* ----- routing ----- */
     nav(view, push) {
-      if (!VIEWS.includes(view)) view = 'scanner';
+      if (!VIEWS.includes(view)) view = 'money';
       S.view = view;
       for (const v of VIEWS) { const el = $('view-' + v); if (el) el.hidden = v !== view; }
       document.querySelectorAll('#nav button[data-nav]').forEach(b => b.classList.toggle('on', b.dataset.nav === view));
@@ -2559,14 +2698,15 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
     },
     render(view) {
       view = view || S.view;
-      if (view === 'scanner') this.renderScanner();
+      if (view === 'money') { if (this.renderMoney) this.renderMoney(); }
+      else if (view === 'scanner') this.renderScanner();
       else if (view === 'markets') this.renderMarkets();
       else if (view === 'tape') this.renderTape();
       else if (view === 'desk') this.renderDesk();
       else if (view === 'setup') this.renderSetup();
     },
     onUniverse() { if (S.view === 'markets' || S.view === 'scanner') this.render(); $('markets-sub').textContent = S.universe.markets.size.toLocaleString() + ' open markets · ' + S.universe.events.size.toLocaleString() + ' events'; if (S.sel) this.renderSheet(); },
-    onScanner() { if (S.view === 'scanner') this.renderScanner(); },
+    onScanner() { if (S.view === 'scanner') this.renderScanner(); else if (S.view === 'money' && this.renderMoney) this.renderMoney(); },
     onDesk() { if (S.view === 'desk') this.renderDesk(); },
     onPrices(changed) {
       const flash = new Map(changed.map(c => [c.ticker, c.dir]));
@@ -2596,7 +2736,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
     renderScanner() {
       const ops = S.scanner.ops, counts = Scanner.counts();
       const banner = $('scanner-banner');
-      banner.innerHTML = this.sourceBanner();
+      banner.innerHTML = this.sourceBanner() + (S.mode === 'live' && this.moneyBanner ? this.moneyBanner() : '');
       this.renderPrimer();
       $('scanner-hint').innerHTML = P.scannerPlain();
       const kinds = ['all', 'arb', 'yield', 'spread', 'mover', 'volume', 'longshot'];
@@ -2644,7 +2784,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
       if (o.kind === 'arb') { const sets = Math.max(1, Math.min(10, Math.floor(o.size || 1))); actions += '<button class="btn sm primary" data-act="paperset" data-i="' + S.scanner.ops.indexOf(o) + '" data-n="' + sets + '">Paper ' + sets + ' set' + (sets > 1 ? 's' : '') + '</button>'; }
       else if (o.kind === 'yield') actions += '<button class="btn sm ' + o.side + '" data-act="ticket" data-t="' + esc(t0) + '" data-side="' + o.side + '">Paper ' + o.side.toUpperCase() + ' at ' + U.cents(o.price) + '</button>';
       else if (o.kind === 'longshot') actions += '<button class="btn sm no" data-act="ticket" data-t="' + esc(t0) + '" data-side="no">Paper NO at ' + U.cents(o.noPrice) + '</button>';
-      else if (o.kind === 'spread') actions += '<button class="btn sm" data-act="ticket" data-t="' + esc(t0) + '" data-side="yes" data-type="limit" data-price="' + (o.yb + 0.01).toFixed(2) + '">Rest a bid at ' + U.cents(o.yb + 0.01) + '</button>';
+      else if (o.kind === 'spread') actions += '<button class="btn sm" data-act="mpaperq" data-k="' + esc(this.opKey(o)) + '">Paper: quote both sides</button>';
       if (o.kind !== 'arb') actions += '<button class="btn sm ghost" data-act="watch" data-t="' + esc(t0) + '">' + (watchOn ? 'Unwatch' : 'Watch') + '</button>';
       if (m0) actions += '<a class="btn sm ghost" href="' + this.kalshiUrl(m0) + '" target="_blank" rel="noopener">Kalshi</a>';
       const brief = S.scanner.brief && S.scanner.brief.items ? S.scanner.brief.items.find(b => b.key === this.opKey(o)) : null;
@@ -3216,7 +3356,7 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
     Persist.apply(Persist.loadLocal());
     if (!S.desk) S.desk = window.EDApp.newDesk(S.settings.bankroll);
     const v = location.hash.replace('#', '');
-    UI.nav(VIEWS.includes(v) ? v : 'scanner', false);
+    UI.nav(VIEWS.includes(v) ? v : 'money', false);
     UI.renderStatus();
     Engine.boot().then(() => { if (window.EDAcct) window.EDAcct.probe().then(() => { if (UI.onAccount) UI.onAccount(); }); });
     // capabilities arrive later; light features up when they do
@@ -3644,6 +3784,245 @@ code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sun
     if (act === 'engstart2') { el.disabled = true; try { await Eng.req('toggle', { method: 'POST', body: { enabled: true } }); UI.toast('Engine started'); } catch (e) { UI.toast(e.message); } await Eng.refresh(true); return; }
     if (act === 'engstop') { el.disabled = true; const sh = Eng.st.status && Eng.st.status.settings && Eng.st.status.settings.shadow; try { await Eng.req('toggle', { method: 'POST', body: { enabled: false, flatten: true }, timeout: 60000 }); UI.toast(sh ? 'Shadow run stopped' : 'Engine stopped; quotes cancelled'); } catch (e) { UI.toast(e.message); } await Eng.refresh(true); if (Acct.st.unlocked) Acct.refresh(); return; }
   });
+})();
+</script>
+<script>
+/* Edge Desk app, part 5: Money — small, mostly locked-in plays (book locks and spreads), checked live, with paper and real
+   one-tap execution. Locks buy every leg through the Worker's /desk/book (fresh books, all legs at once, extras sold back);
+   spreads rest a bid and an offer inside the gap, both post-only. */
+(function () {
+  'use strict';
+  const { U, F } = window.ED;
+  const { S, DS, Desk } = window.EDApp;
+  const UI = window.UI, Acct = window.EDAcct, P = window.EDPlain, M = window.EDMoney;
+  const $ = (id) => document.getElementById(id);
+  const esc = U.esc;
+
+  const MS = window.EDMoneyState = { checks: new Map(), busy: new Set(), real: new Map(), at: 0 };
+  const keyOf = (o) => UI.opKey(o);
+  const findOp = (k) => S.scanner.ops.find(o => keyOf(o) === k) || null;
+  const canReal = () => Acct.available() && Acct.st.unlocked && Acct.envOk();
+  const bank = () => { const b = Math.max(50, S.settings.bankroll || 500); const cash = Acct.st.unlocked && Acct.st.balance ? Acct.st.balance.cash : null; return cash !== null && cash > 0 ? Math.min(b, cash) : b; };
+  const caps = () => Acct.st.limits || { contracts: 100, dollars: 100 };
+  const sset = () => Object.assign({}, S.settings, { bankroll: bank() }); // spreads are sized on the same money as locks
+  const LOCK_SHARE = 0.10, MIN_EDGE = 0.005;
+  const horizon = (d) => d === null || d === undefined ? 'at settlement' : d < 1 ? 'in ' + Math.max(1, Math.round(d * 24)) + ' hours' : d < 60 ? 'in ' + Math.round(d) + ' days' : d < 365 ? 'in ' + Math.round(d / 30.4) + ' months' : 'in ' + (d / 365).toFixed(1) + ' years';
+  const sideOf = (o) => (o.sub === 'no' ? 'no' : 'yes');
+  const payoutOf = (o) => (o.sub === 'no' ? o.tickers.length - 1 : 1);
+
+  /* ---------- the plays ---------- */
+  function scanSets(o) { return Math.max(0, Math.min(Math.floor(o.size || 0), Math.floor(bank() * LOCK_SHARE / Math.max(0.01, o.cost)))); }
+  // What a lock is worth now: the live check when there is one, else the scan's top-of-book numbers.
+  function lockNow(o) {
+    const c = MS.checks.get(keyOf(o));
+    if (c && c.plan && c.plan.sets) return { live: true, at: c.at, sets: c.plan.sets, profit: c.plan.profit, cost: c.plan.cost + c.plan.fees, payout: c.plan.payout, plan: c.plan };
+    if (c && c.plan && !c.plan.sets) return { live: true, gone: true, at: c.at, reason: c.plan.reason, sets: 0, profit: 0, cost: 0, payout: 0 };
+    const sets = scanSets(o);
+    return { live: false, sets, profit: sets * o.margin, cost: sets * o.cost, payout: sets * payoutOf(o) };
+  }
+  function locks() {
+    return S.scanner.ops.filter(o => o.kind === 'arb').map(o => ({ o, n: lockNow(o) }))
+      .sort((a, b) => (a.n.gone === b.n.gone ? 0 : a.n.gone ? 1 : -1) || b.n.profit - a.n.profit).map(x => x.o);
+  }
+  function spreads() {
+    const rank = { do: 0, maybe: 1, skip: 2 };
+    return S.scanner.ops.filter(o => o.kind === 'spread').map(o => ({ o, p: P.spreadPlan(o, sset()), v: P.verdict(o, sset()) }))
+      .filter(x => x.p.n >= 1).sort((a, b) => (rank[a.v.stance] - rank[b.v.stance]) || b.p.rank - a.p.rank).map(x => x.o);
+  }
+  function lockVerdict(o, now) {
+    const isNo = o.sub === 'no', n = o.tickers.length, side = isNo ? 'NO' : 'YES';
+    if (now.gone) return { stance: 'skip', label: 'Gone for now', text: 'The live order books no longer lock a profit (' + now.reason + '). Locks like this come and go; this tab re-checks every 20 seconds while it is open.' };
+    if (now.sets < 1) return { stance: 'skip', label: 'Skip', text: 'Not enough on the book for one full set at a profit.' };
+    if (now.profit < 0.25) return { stance: 'skip', label: 'Skip', text: 'The whole lock is about ' + U.money(now.profit) + '. Not worth the fees on a leg that fails to fill.' };
+    const ann = now.cost > 0 && o.days >= 14 ? (now.profit / now.cost) * (365 / o.days) : null; // a yearly rate means little for a short lock
+    const text = 'Buy ' + side + ' on all ' + n + ' outcomes, ' + now.sets + ' set' + (now.sets > 1 ? 's' : '') + ' for about ' + U.money(now.cost) + '. That locks ' + U.money(now.profit) + ' (' + U.cents(now.profit / now.sets) + ' a set), paid ' + horizon(o.days) + (ann !== null ? ', ' + U.pct(ann, 0) + ' a year' : '') + '. ' + (isNo ? 'Kalshi marks this event one-winner, so at most one of your NOs can lose.' : 'Exactly one outcome pays $1 a set because ' + (o.why || 'one of them must happen') + '.') + (now.live ? '' : ' Checking the live books before you act.');
+    if (ann !== null && ann < 0.08 && o.days > 45) return { stance: 'maybe', label: 'Maybe', text: text + ' The money is tied up a long time for that; do it only if the cash would sit idle anyway.' };
+    return { stance: 'do', label: 'Do it', text };
+  }
+
+  /* ---------- live checks ---------- */
+  async function check(o) {
+    const k = keyOf(o); if (MS.busy.has(k)) return; MS.busy.add(k); soon();
+    try {
+      const books = await Promise.all(o.tickers.map(t => DS.book(t)));
+      const legs = o.tickers.map((t, i) => ({ ticker: t, levels: (books[i] && (o.sub === 'no' ? books[i].noAsks : books[i].yesAsks)) || [] }));
+      const m0 = S.universe.markets.get(o.tickers[0]);
+      const rate = F.rate('taker', m0 ? Desk.feeInfo(m0) : {});
+      const plan = M.bookPlan(legs, { payout: payoutOf(o), feeRate: rate, minEdge: MIN_EDGE, maxSets: caps().contracts, maxCost: bank() * LOCK_SHARE, perOrder: caps() });
+      MS.checks.set(k, { at: Date.now(), plan });
+    } catch (e) { MS.checks.set(k, { at: Date.now(), error: (e && e.message) || 'could not read the order books' }); }
+    finally { MS.busy.delete(k); soon(); }
+  }
+  function autoCheck() {
+    if (S.view !== 'money' || document.hidden) return;
+    for (const o of locks().slice(0, 3)) { const c = MS.checks.get(keyOf(o)); if (!MS.busy.has(keyOf(o)) && (!c || Date.now() - c.at > 25000)) check(o); }
+  }
+  setInterval(autoCheck, 20000);
+  let soonT = null;
+  function soon() { clearTimeout(soonT); soonT = setTimeout(() => { if (S.view === 'money') UI.renderMoney(); }, 60); }
+
+  /* ---------- paper ---------- */
+  function paperLock(o) {
+    const now = lockNow(o); const n = Math.max(1, Math.min(now.sets || 1, 50));
+    let placed = 0;
+    for (const t of o.tickers) { const m = S.universe.markets.get(t); if (!m) continue; const r = Desk.buy(m, sideOf(o), n, 'market', null, null); if (r.ok) placed++; else { UI.toast(r.msg); break; } }
+    if (placed) UI.toast('Paper: bought ' + sideOf(o).toUpperCase() + ' on ' + placed + ' of ' + o.tickers.length + ' legs, ' + n + ' each');
+    UI.onDesk();
+  }
+  function paperQuote(o) {
+    const m = S.universe.markets.get(o.tickers[0]); if (!m) return;
+    const p = P.spreadPlan(o, sset()); if (p.n < 1) { UI.toast('Too small to quote at your bankroll'); return; }
+    const a = Desk.buy(m, 'yes', p.n, 'limit', p.bid), b = Desk.buy(m, 'no', p.n, 'limit', U.round(1 - p.ask, 2));
+    UI.toast(a.ok && b.ok ? 'Paper: resting a bid for ' + p.n + ' YES at ' + U.cents(p.bid) + ' and an offer at ' + U.cents(p.ask) : (a.ok ? b.msg : a.msg));
+    UI.onDesk();
+  }
+
+  /* ---------- real ---------- */
+  async function openConfirm(o) {
+    const k = keyOf(o);
+    if (o.kind === 'arb') { MS.real.set(k, { stage: 'checking' }); render(); await check(o); MS.real.set(k, { stage: 'confirm' }); }
+    else MS.real.set(k, { stage: 'confirm' });
+    render();
+  }
+  async function sendLock(o) {
+    const k = keyOf(o), now = lockNow(o);
+    MS.real.set(k, { stage: 'sending' }); render();
+    try {
+      const r = await Acct.book({ event: o.event, side: sideOf(o), tickers: o.tickers, maxSets: Math.max(1, now.sets), maxCost: Math.max(1, bank() * LOCK_SHARE), minEdge: MIN_EDGE });
+      MS.real.set(k, { stage: 'done', book: r });
+    } catch (e) { MS.real.set(k, { stage: 'error', error: e.message, gone: !!(e.data && e.data.gone) }); if (e.data && e.data.plan) MS.checks.set(k, { at: Date.now(), plan: e.data.plan }); }
+    render();
+  }
+  async function sendQuote(o) {
+    const k = keyOf(o), m = S.universe.markets.get(o.tickers[0]), p = P.spreadPlan(o, sset());
+    if (!m) return;
+    MS.real.set(k, { stage: 'sending' }); render();
+    let bidRes = null, askRes = null, bidErr = '', askErr = '';
+    try { bidRes = await Acct.place(m, { side: 'yes', action: 'buy', count: p.n, limit: p.bid, tif: 'gtc', postOnly: true }); } catch (e) { bidErr = e.message; }
+    if (!bidErr) { try { askRes = await Acct.place(m, { side: 'no', action: 'buy', count: p.n, limit: U.round(1 - p.ask, 2), tif: 'gtc', postOnly: true }); } catch (e) { askErr = e.message; } }
+    MS.real.set(k, bidErr ? { stage: 'error', error: 'The bid was refused: ' + bidErr + '. Nothing was placed.' } : { stage: 'done', quote: { p, bidRes, askRes, askErr } });
+    render();
+  }
+  function realPanel(o) {
+    const k = keyOf(o), st = MS.real.get(k); if (!st) return '';
+    const back = '<button class="btn sm" data-act="mback" data-k="' + esc(k) + '">Close</button>';
+    if (st.stage === 'checking') return '<div class="confirm"><p class="think">Reading every leg\'s order book…</p></div>';
+    if (st.stage === 'sending') return '<div class="confirm"><p class="think">Sending to Kalshi…</p></div>';
+    if (st.stage === 'error') return '<div class="confirm"><p><b>' + (st.gone ? 'Not sent.' : 'Did not go through.') + '</b> ' + esc(st.error) + '</p><div class="actions">' + back + '</div></div>';
+    if (o.kind === 'arb') {
+      if (st.stage === 'confirm') {
+        const now = lockNow(o);
+        if (!now.sets) return '<div class="confirm"><p><b>Nothing to buy right now.</b> ' + esc(now.reason || 'The lock is gone on the live books.') + '</p><div class="actions">' + back + '</div></div>';
+        return '<div class="confirm"><p><b>Real money.</b> Buys ' + sideOf(o).toUpperCase() + ' on all ' + o.tickers.length + ' legs: up to <b>' + now.sets + ' sets</b> for about <b>' + U.money(now.cost) + '</b>, locking about <b>' + U.money(now.profit) + '</b>, paid ' + horizon(o.days) + '. The Worker re-reads every order book and sends only if it still locks at least ' + U.cents(MIN_EDGE) + ' a set, so it may buy fewer. All legs go out at once; if some fill more than others, the extra contracts are sold straight back so you are left with complete sets only.</p><div class="actions"><button class="btn sm danger-fill" data-act="mlockgo" data-k="' + esc(k) + '">Buy the book</button>' + back + '</div></div>';
+      }
+      if (st.stage === 'done') {
+        const r = st.book || {};
+        const head = r.sets ? 'Bought ' + r.sets + ' complete set' + (r.sets > 1 ? 's' : '') + ' for about ' + U.money(r.cost + r.fees) + '. Locked about ' + U.money(r.locked, { plus: true }) + '; pays ' + U.money(r.payout) + ' ' + horizon(o.days) + '.' : 'No complete sets: the prices moved before every leg filled' + ((r.legs || []).some(l => l.filled > 0) ? ', so what did fill was sold back.' : '; nothing was bought.');
+        const extra = (r.legs || []).filter(l => l.extra > 0);
+        const tail = extra.length ? ' Sold back ' + extra.map(l => l.sold + ' extra on ' + esc(legName(l.ticker)) + (l.soldAt !== null && l.soldAt !== undefined ? ' near ' + U.cents(l.soldAt) : '')).join(', ') + ' (' + U.money(r.unwindPnl, { plus: true }) + ').' : '';
+        const warn = r.unhedged > 0 ? '<p class="down"><b>' + r.unhedged + ' contract' + (r.unhedged > 1 ? 's' : '') + ' could not be sold back.</b> They are in Desk → Live account; sell them there.</p>' : '';
+        return '<div class="confirm"><p>' + esc(head) + tail + '</p>' + warn + '<div class="actions"><button class="btn sm" data-act="nav" data-v="desk">See it in Live account</button>' + back + '</div></div>';
+      }
+    } else {
+      const p = P.spreadPlan(o, sset());
+      if (st.stage === 'confirm') return '<div class="confirm"><p><b>Real money.</b> Two resting orders, both post-only (they only ever wait on the book, never take a price): <b>buy ' + p.n + ' YES at ' + U.cents(p.bid) + '</b> and <b>offer ' + p.n + ' YES at ' + U.cents(p.ask) + '</b> (buying NO at ' + U.cents(1 - p.ask) + '). Up to ' + U.money(p.capital) + ' is held while they rest. Both filling keeps ' + U.money(p.keep) + '. If only one fills you hold ' + p.n + ' contracts at that price; cancel the other in Live account or leave it to complete.</p><div class="actions"><button class="btn sm danger-fill" data-act="mquotego" data-k="' + esc(k) + '">Place both orders</button>' + back + '</div></div>';
+      if (st.stage === 'done') {
+        const q = st.quote;
+        return '<div class="confirm"><p>' + (q.askRes ? 'Both orders are resting: bid ' + q.p.n + ' at ' + U.cents(q.p.bid) + ', offer ' + q.p.n + ' at ' + U.cents(q.p.ask) + '. They show under Resting orders in Live account.' : 'The bid is resting at ' + U.cents(q.p.bid) + ', but the offer was refused (' + esc(q.askErr) + '). Cancel the bid in Live account if you only wanted both.') + '</p><div class="actions"><button class="btn sm" data-act="nav" data-v="desk">See it in Live account</button>' + back + '</div></div>';
+      }
+    }
+    return '';
+  }
+  function legName(t) { const m = S.universe.markets.get(t); return m ? (m.yesSub || m.title || t) : t; }
+
+  /* ---------- rendering ---------- */
+  function realButton(o) {
+    if (S.mode !== 'live' || !Acct.available()) return '';
+    if (!canReal()) return '<button class="btn sm ghost" data-act="nav" data-v="desk" title="Desk → Live account">Unlock to do it for real</button>';
+    return '<button class="btn sm primary" data-act="mreal" data-k="' + esc(keyOf(o)) + '">' + (o.kind === 'arb' ? 'Buy it for real' : 'Quote it for real') + '</button>';
+  }
+  function lockCard(o) {
+    const k = keyOf(o), now = lockNow(o), c = MS.checks.get(k), busy = MS.busy.has(k);
+    const ev = S.universe.events.get(o.event), cat = ev && ev.category ? ev.category : '';
+    const isNo = o.sub === 'no', n = o.tickers.length, v = lockVerdict(o, now);
+    const ann = now.cost > 0 && o.days >= 14 ? (now.profit / now.cost) * (365 / o.days) : null;
+    const amt = now.gone ? '<div class="money-amt"><b class="muted">$0.00</b> <span class="muted">right now · was ' + U.money(scanSets(o) * o.margin) + ' in the scan</span></div>'
+      : '<div class="money-amt"><b class="up">' + U.money(now.profit, { plus: true }) + '</b><span class="muted">locked · ' + now.sets + ' set' + (now.sets === 1 ? '' : 's') + ' × ' + U.cents(now.profit / Math.max(1, now.sets)) + ' · costs ' + U.money(now.cost) + ' · pays ' + U.money(now.payout) + (ann !== null ? ' · ' + U.pct(ann, 0) + ' a year' : '') + '</span></div>';
+    const live = busy ? '<div class="money-live">Reading the live order books…</div>'
+      : c && c.error ? '<div class="money-live">Could not check the live books: ' + esc(c.error) + '</div>'
+      : c ? '<div class="money-live ' + (now.gone ? 'gone' : 'ok') + '">' + (now.gone ? 'Gone on the live books ' : 'Still there on the live books, ' + now.sets + ' sets deep' + (c.plan.limitedBy ? ' (limited by ' + esc(c.plan.limitedBy) + ')' : '') + ', ') + U.ago(c.at) + ' ago</div>'
+      : '<div class="money-live">From the market scan ' + (S.scanner.at ? U.ago(S.scanner.at) + ' ago' : '') + '; the live books get checked next.</div>';
+    const planLegs = c && c.plan && c.plan.legs ? new Map(c.plan.legs.map(l => [l.ticker, l])) : null;
+    const legs = '<details class="layer-d"><summary>The ' + n + ' legs</summary><div class="legs">' + o.tickers.map(t => { const m = S.universe.markets.get(t); const pl = planLegs && planLegs.get(t); const px = pl ? pl.avg : (m ? (isNo ? 1 - m.yb : m.ya) : null); return '<div><span class="truncate" style="max-width:70%"><a href="#" data-act="open" data-t="' + esc(t) + '">' + esc(legName(t)) + '</a></span><span class="' + (isNo ? 'no' : 'yes') + '">' + (isNo ? 'NO ' : 'YES ') + (px !== null ? U.cents(px) : '—') + (pl && Math.abs(pl.limit - pl.avg) > 0.0001 ? ' <span class="faint">(up to ' + U.cents(pl.limit) + ')</span>' : '') + '</span></div>'; }).join('') + '</div></details>';
+    const why = isNo
+      ? '<p>Kalshi says at most one of these ' + n + ' outcomes can happen. Buy NO on all of them and at most one NO loses, so every set pays at least ' + U.money(n - 1) + ', whatever happens. Right now a set costs less than that.</p>'
+      : '<p>One of these ' + n + ' outcomes must happen and only one can (' + esc(o.why || 'they cover every possibility') + '). Buy YES on all of them and every set pays exactly $1, whatever happens. Right now a set costs less than that.</p>';
+    const catch_ = '<p>The catch is getting every leg filled. Edge Desk sends them all at once and sells back any leg that fills more than the others, so you end up with complete sets only. Read the rules once: a voided market or an odd settlement rule can break a set.</p>';
+    const math = '<p>' + esc(o.math) + '</p>' + (c && c.plan && c.plan.sets ? '<p>Live: ' + c.plan.sets + ' sets cost ' + U.money(c.plan.cost) + ' plus ' + U.money(c.plan.fees) + ' in fees (each fill rounded up to the cent) and pay ' + U.money(c.plan.payout) + '. Best prices sum to ' + U.cents(c.plan.bestSum) + '. Budget ' + Math.round(LOCK_SHARE * 100) + '% of ' + U.money(bank()) + '.</p>' : '');
+    return '<div class="card opp money" data-mk="' + esc(k) + '">' +
+      '<div class="opp-head"><span class="kind arb">' + (isNo ? 'Sell the book' : 'Buy the book') + '</span><span class="faint small">' + n + ' outcomes' + (cat ? ' · ' + esc(cat) : '') + '</span><span class="faint small" style="margin-left:auto">pays out ' + horizon(o.days) + '</span></div>' +
+      '<div class="title">' + esc(o.title) + '</div>' + amt + live +
+      (P.on() ? P.layer(P.verdictHtml(v), why + catch_, math, { label: 'My call' }) : '<div class="math">' + esc(o.math) + '</div>') + legs +
+      '<div class="actions"><button class="btn sm" data-act="mcheck" data-k="' + esc(k) + '"' + (busy ? ' disabled' : '') + '>Check again</button><button class="btn sm" data-act="mpaperl" data-k="' + esc(k) + '"' + (now.gone ? ' disabled' : '') + '>Paper ' + Math.max(1, Math.min(now.sets || 1, 50)) + ' sets</button>' + (now.gone ? '' : realButton(o)) + '</div>' +
+      '<div class="money-real">' + realPanel(o) + '</div></div>';
+  }
+  function spreadCard(o) {
+    const k = keyOf(o), p = P.spreadPlan(o, sset()), v = P.verdict(o, sset()), m = S.universe.markets.get(o.tickers[0]);
+    const why = '<p>Buyers will pay ' + U.cents(o.yb) + ' and sellers want ' + U.cents(o.ya) + ': a ' + U.cents(o.spread) + ' gap. Rest a bid just above the best bid and an offer just below the best offer; when both fill, you have bought at ' + U.cents(p.bid) + ' and sold at ' + U.cents(p.ask) + ' and the difference is yours, whatever the market does next.</p><p>Both orders only wait on the book, so they never pay to cross the gap. The risk is that one side fills and the other does not because the price moved for a reason, which leaves you holding a position. That is why the size stays small.</p>';
+    const math = '<p>' + esc(o.math) + '</p><p>' + p.n + ' a side at ' + U.cents(p.bid) + ' / ' + U.cents(p.ask) + ': ' + U.money(p.capital) + ' held while resting (' + Math.round(p.share * 100) + '% of ' + U.money(bank()) + '); keeps ' + U.cents(p.keepPer) + ' a pair after maker fees when both fill. 24h volume ' + U.compact(o.vol24) + '.</p>';
+    return '<div class="card opp money" data-mk="' + esc(k) + '">' +
+      '<div class="opp-head"><span class="kind spread">Spread</span><span class="faint small">' + U.cents(o.spread) + ' gap · ' + U.compact(o.vol24) + ' traded today</span>' + (m && m.close ? '<span class="faint small" style="margin-left:auto">closes in ' + U.countdown(m.close) + '</span>' : '') + '</div>' +
+      '<div class="title">' + esc(o.title) + '</div>' +
+      '<div class="money-amt"><b class="up">' + U.money(p.keep, { plus: true }) + '</b><span class="muted">if both sides fill · ' + p.n + ' at ' + U.cents(p.bid) + ' / ' + U.cents(p.ask) + '</span></div>' +
+      (P.on() ? P.layer(P.verdictHtml(v), why, math, { label: 'My call' }) : '<div class="math">' + esc(o.math) + '</div>') +
+      '<div class="actions"><button class="btn sm" data-act="mpaperq" data-k="' + esc(k) + '">Paper: quote both sides</button>' + realButton(o) + '<button class="btn sm ghost" data-act="open" data-t="' + esc(o.tickers[0]) + '">Open</button></div>' +
+      '<div class="money-real">' + realPanel(o) + '</div></div>';
+  }
+  function render() { if (S.view === 'money') UI.renderMoney(); }
+
+  Object.assign(UI, {
+    renderMoney() {
+      const box = $('view-money'); if (!box) return;
+      $('money-banner').innerHTML = UI.sourceBanner();
+      const L = locks(), Sp = spreads();
+      const liveL = L.map(o => lockNow(o)).filter(x => !x.gone && x.sets > 0);
+      const total = liveL.reduce((s, x) => s + x.profit, 0);
+      const doSp = Sp.filter(o => P.verdict(o, sset()).stance === 'do');
+      const spKeep = Sp.slice(0, 12).reduce((s, o) => s + P.spreadPlan(o, sset()).keep, 0);
+      $('money-sub').textContent = S.universe.markets.size ? S.universe.markets.size.toLocaleString() + ' open markets scanned ' + (S.scanner.at ? U.ago(S.scanner.at) + ' ago' : '') : 'Loading the market universe';
+      $('money-hint').innerHTML = P.on() ? 'Two ways to make small, steady money <b>without predicting anything</b>: buy every outcome of an event for less than the set must pay (a lock), or stand in a wide gap between buyers and sellers and keep the difference. Each is worth cents to a few dollars; they add up by repetition, not by size.' : '';
+      $('money-tiles').innerHTML =
+        '<div class="tile"><div class="label">Locks now</div><div class="v ' + (liveL.length ? 'up' : '') + '">' + liveL.length + '</div><div class="s">' + (liveL.length ? 'about ' + U.money(total) + ' locked at the shown size' : 'none right now; they are rare and brief') + '</div></div>' +
+        '<div class="tile"><div class="label">Spreads to quote</div><div class="v">' + doSp.length + '<span class="faint small"> / ' + Sp.length + '</span></div><div class="s">' + (Sp.length ? 'good ones / all; about ' + U.money(spKeep) + ' if the top 12 fill both ways' : 'no wide gaps with volume right now') + '</div></div>' +
+        '<div class="tile"><div class="label">Sized on</div><div class="v">' + U.money(bank()) + '</div><div class="s">' + (Acct.st.unlocked && Acct.st.balance ? 'your Kalshi cash or the bankroll setting, whichever is less' : 'the bankroll setting (Setup); locks use up to 10%, each spread 2%') + '</div></div>';
+      $('money-locks-hint').innerHTML = P.on() ? 'Buy one contract of every outcome for less than the set must pay. Nothing to predict: the risks are a leg not filling (Edge Desk sells back any extra) and the rules (a voided market). They are rare and short-lived, so the top three are re-checked against the live order books every 20 seconds while this tab is open.' : '';
+      $('money-locks').innerHTML = L.length ? L.slice(0, 12).map(lockCard).join('') : '<div class="empty">' + (S.universe.markets.size ? 'No locks in the scanned markets right now. The scan runs every ' + Math.max(2, S.settings.universeRefreshMin || 15) + ' minutes; widen it with more pages in Setup.' : 'Markets are loading.') + '</div>';
+      $('money-spreads-hint').innerHTML = P.on() ? 'Rest a bid just above the best bid and an offer just below the best offer. When both fill you keep the gap. Both orders only wait on the book, so they never pay to cross; the risk is one side filling without the other, so each stays at 2% of your bankroll.' : '';
+      $('money-spreads').innerHTML = Sp.length ? Sp.slice(0, 12).map(spreadCard).join('') : '<div class="empty">' + (S.universe.markets.size ? 'No wide spreads with enough trading right now.' : 'Markets are loading.') + '</div>';
+      autoCheck();
+    },
+    // A line on the Scanner when locks exist, pointing at Money.
+    moneyBanner() {
+      const L = S.scanner.ops.filter(o => o.kind === 'arb').map(o => lockNow(o)).filter(x => !x.gone && x.sets > 0);
+      if (!L.length) return '';
+      const total = L.reduce((s, x) => s + x.profit, 0);
+      return '<div class="banner good"><div><p><b>' + L.length + ' lock' + (L.length > 1 ? 's' : '') + ' right now</b>, about ' + U.money(total) + ' at the shown size: buy every outcome for less than it must pay.</p><div class="actions"><button class="btn sm primary" data-act="nav" data-v="money">Open Money</button></div></div></div>';
+    }
+  });
+
+  document.addEventListener('click', (ev) => {
+    const el = ev.target.closest('[data-act]'); if (!el) return;
+    const act = el.dataset.act; if (!/^m(check|paperl|paperq|real|back|lockgo|quotego)$/.test(act)) return;
+    const o = findOp(el.dataset.k); if (!o) { UI.toast('That play is no longer in the scan'); render(); return; }
+    if (act === 'mcheck') { check(o); return; }
+    if (act === 'mpaperl') { paperLock(o); return; }
+    if (act === 'mpaperq') { paperQuote(o); return; }
+    if (act === 'mreal') { openConfirm(o); return; }
+    if (act === 'mback') { MS.real.delete(keyOf(o)); render(); return; }
+    if (act === 'mlockgo') { el.disabled = true; sendLock(o); return; }
+    if (act === 'mquotego') { el.disabled = true; sendQuote(o); return; }
+  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) autoCheck(); });
 })();
 </script>
 </body></html>

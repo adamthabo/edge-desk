@@ -17,6 +17,8 @@
 
 const PAGE = __PAGE__;
 
+__MONEY__
+
 __DESK__
 
 __ENGINE__
@@ -148,5 +150,6 @@ export default {
   }
 };
 export const __desk = EdgeDeskAccount;
+export const __money = EDMoney;
 export { EngineDO };
 export const __engine = EdgeDeskEngine;

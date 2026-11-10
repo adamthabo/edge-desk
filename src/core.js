@@ -413,7 +413,7 @@
           const score = spread * 100 * Math.log10(10 + m.vol24);
           out.push({
             kind: 'spread', score: score, tickers: [m.ticker], event: m.event, title: label,
-            spread: spread, yb: m.yb, ya: m.ya, vol24: m.vol24,
+            spread: spread, yb: m.yb, ya: m.ya, vol24: m.vol24, makerRate: makerRate, days: days,
             headline: 'Spread ' + U.cents(spread) + ' wide (' + U.cents(m.yb) + ' / ' + U.cents(m.ya) + ')',
             math: 'A resting bid at ' + U.cents(m.yb + 0.01) + ' and an offer at ' + U.cents(m.ya - 0.01) + ' still improve both sides by 1¢ and keep ' + U.cents(spread - 0.02) + ' between them. 24h volume ' + U.compact(m.vol24) + '. ' + (makerRate > 0 ? 'This series charges maker fees (' + (makerRate * 100).toFixed(2) + '% × P × (1−P)).' : 'Resting orders pay no fee on this series.'),
             note: 'You only earn the spread if both sides fill; a one-sided fill leaves you with a position. Adverse selection is the real cost here.'

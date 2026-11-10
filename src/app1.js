@@ -30,7 +30,7 @@
     watch: new Set(),
     desk: null,
     seriesCache: {},
-    view: 'scanner',
+    view: 'money',
     sel: null,
     sheet: { book: null, trades: [], candles: [], range: '1W', candlesAt: 0, ai: null, aiBusy: false, calcQ: null, ticket: { side: 'yes', type: 'market', qty: 10, price: null } },
     ai: null,                // sample() or null

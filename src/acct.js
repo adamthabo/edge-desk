@@ -113,6 +113,11 @@
       this.refresh().catch(() => { /* shown in panel */ });
       return r;
     },
+    // Buy every leg of a one-winner book through the Worker (fresh books, all legs at once, extras sold back).
+    async book(body) {
+      try { return await this.req('book', { method: 'POST', body, timeout: 45000 }); }
+      finally { this.refresh().catch(() => { /* shown in panel */ }); }
+    },
     async cancel(order) {
       const r = await this.req('order/' + encodeURIComponent(order.id), { method: 'DELETE', query: { ticker: order.ticker } });
       this.refresh().catch(() => { /* shown in panel */ });

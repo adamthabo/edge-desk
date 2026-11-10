@@ -9,7 +9,7 @@
   const T = (key, text) => P.term(key, text);
   const cssEsc = (s) => (window.CSS && typeof window.CSS.escape === 'function') ? window.CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&');
   const KINDS = { arb: 'Book arbitrage', yield: 'Near-certain yield', spread: 'Wide spread', mover: 'Mover', volume: 'Volume surge', longshot: 'Longshot zone' };
-  const VIEWS = ['scanner', 'markets', 'tape', 'desk', 'setup'];
+  const VIEWS = ['money', 'scanner', 'markets', 'tape', 'desk', 'setup'];
 
   const UI = window.UI = {
     mk: { search: '', sort: 'vol24', cat: 'all', watchOnly: false, limit: 80 },
@@ -45,7 +45,7 @@
     },
     /* ----- routing ----- */
     nav(view, push) {
-      if (!VIEWS.includes(view)) view = 'scanner';
+      if (!VIEWS.includes(view)) view = 'money';
       S.view = view;
       for (const v of VIEWS) { const el = $('view-' + v); if (el) el.hidden = v !== view; }
       document.querySelectorAll('#nav button[data-nav]').forEach(b => b.classList.toggle('on', b.dataset.nav === view));
@@ -56,14 +56,15 @@
     },
     render(view) {
       view = view || S.view;
-      if (view === 'scanner') this.renderScanner();
+      if (view === 'money') { if (this.renderMoney) this.renderMoney(); }
+      else if (view === 'scanner') this.renderScanner();
       else if (view === 'markets') this.renderMarkets();
       else if (view === 'tape') this.renderTape();
       else if (view === 'desk') this.renderDesk();
       else if (view === 'setup') this.renderSetup();
     },
     onUniverse() { if (S.view === 'markets' || S.view === 'scanner') this.render(); $('markets-sub').textContent = S.universe.markets.size.toLocaleString() + ' open markets · ' + S.universe.events.size.toLocaleString() + ' events'; if (S.sel) this.renderSheet(); },
-    onScanner() { if (S.view === 'scanner') this.renderScanner(); },
+    onScanner() { if (S.view === 'scanner') this.renderScanner(); else if (S.view === 'money' && this.renderMoney) this.renderMoney(); },
     onDesk() { if (S.view === 'desk') this.renderDesk(); },
     onPrices(changed) {
       const flash = new Map(changed.map(c => [c.ticker, c.dir]));
@@ -93,7 +94,7 @@
     renderScanner() {
       const ops = S.scanner.ops, counts = Scanner.counts();
       const banner = $('scanner-banner');
-      banner.innerHTML = this.sourceBanner();
+      banner.innerHTML = this.sourceBanner() + (S.mode === 'live' && this.moneyBanner ? this.moneyBanner() : '');
       this.renderPrimer();
       $('scanner-hint').innerHTML = P.scannerPlain();
       const kinds = ['all', 'arb', 'yield', 'spread', 'mover', 'volume', 'longshot'];
@@ -141,7 +142,7 @@
       if (o.kind === 'arb') { const sets = Math.max(1, Math.min(10, Math.floor(o.size || 1))); actions += '<button class="btn sm primary" data-act="paperset" data-i="' + S.scanner.ops.indexOf(o) + '" data-n="' + sets + '">Paper ' + sets + ' set' + (sets > 1 ? 's' : '') + '</button>'; }
       else if (o.kind === 'yield') actions += '<button class="btn sm ' + o.side + '" data-act="ticket" data-t="' + esc(t0) + '" data-side="' + o.side + '">Paper ' + o.side.toUpperCase() + ' at ' + U.cents(o.price) + '</button>';
       else if (o.kind === 'longshot') actions += '<button class="btn sm no" data-act="ticket" data-t="' + esc(t0) + '" data-side="no">Paper NO at ' + U.cents(o.noPrice) + '</button>';
-      else if (o.kind === 'spread') actions += '<button class="btn sm" data-act="ticket" data-t="' + esc(t0) + '" data-side="yes" data-type="limit" data-price="' + (o.yb + 0.01).toFixed(2) + '">Rest a bid at ' + U.cents(o.yb + 0.01) + '</button>';
+      else if (o.kind === 'spread') actions += '<button class="btn sm" data-act="mpaperq" data-k="' + esc(this.opKey(o)) + '">Paper: quote both sides</button>';
       if (o.kind !== 'arb') actions += '<button class="btn sm ghost" data-act="watch" data-t="' + esc(t0) + '">' + (watchOn ? 'Unwatch' : 'Watch') + '</button>';
       if (m0) actions += '<a class="btn sm ghost" href="' + this.kalshiUrl(m0) + '" target="_blank" rel="noopener">Kalshi</a>';
       const brief = S.scanner.brief && S.scanner.brief.items ? S.scanner.brief.items.find(b => b.key === this.opKey(o)) : null;
@@ -713,7 +714,7 @@
     Persist.apply(Persist.loadLocal());
     if (!S.desk) S.desk = window.EDApp.newDesk(S.settings.bankroll);
     const v = location.hash.replace('#', '');
-    UI.nav(VIEWS.includes(v) ? v : 'scanner', false);
+    UI.nav(VIEWS.includes(v) ? v : 'money', false);
     UI.renderStatus();
     Engine.boot().then(() => { if (window.EDAcct) window.EDAcct.probe().then(() => { if (UI.onAccount) UI.onAccount(); }); });
     // capabilities arrive later; light features up when they do

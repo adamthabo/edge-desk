@@ -15,3 +15,4 @@ export const worker = mod.default;
 export const Desk = mod.__desk._internal;
 export const Eng = mod.__engine._internal;
 export const EngineDO = mod.EngineDO;
+export const Money = mod.__money;

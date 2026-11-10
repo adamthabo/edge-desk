@@ -94,9 +94,11 @@
       return maybe('Only if you can say, in one sentence, why ' + other + ' is really a ' + pc(1 - o.price) + ' shot. If you can: buy ' + n + ' ' + o.side.toUpperCase() + ' at ' + c(o.price) + ' (' + m(n * o.cost) + ', 2% of bankroll). A miss costs all of it, so never more than that.');
     }
     if (o.kind === 'spread') {
-      const bid = o.yb + 0.01; const n = Math.floor((B * 0.01) / bid);
-      if (n < 1) return skip('Too small to matter at your bankroll. Do not cross a ' + c(o.spread) + ' spread for any reason.');
-      return maybe('Do not cross it. If you want this market, rest a bid for ' + n + ' YES at ' + c(bid) + ' (' + m(n * bid) + ', 1% of bankroll) and let the market come to you; cancel it if it has not filled by the close. Earn the spread, never pay it.');
+      const sp = spreadPlan(o, settings);
+      if (sp.n < 1 || sp.keep < 0.05) return skip('Too small to matter at your bankroll. Never cross a ' + c(o.spread) + ' spread: that pays it instead of earning it.');
+      const text = 'Quote both sides: rest a bid for ' + sp.n + ' YES at ' + c(sp.bid) + ' and an offer for ' + sp.n + ' at ' + c(sp.ask) + ' (buying NO at ' + c(1 - sp.ask) + '). Both only wait on the book. If both fill you keep ' + m(sp.keep) + ' (' + c(sp.keepPer) + ' a pair); if only one fills you hold ' + sp.n + ' contracts at that price, which is why it stays this small.';
+      const good = o.spread >= 0.06 && (o.vol24 || 0) >= 100 && o.yb >= 0.10 && o.ya <= 0.90 && (o.days === null || o.days === undefined || o.days >= 1) && sp.keep >= 0.3;
+      return good ? { stance: 'do', label: 'Do it, small', text } : maybe(text + (o.days !== null && o.days !== undefined && o.days < 1 ? ' It closes within a day, when prices jump on news; leave it unless you are watching.' : ''));
     }
     if (o.kind === 'mover') return skip('A ' + c(Math.abs(o.delta)) + ' jump in a day means news, and the people who moved it already know it. Unless you can name the news and judge it better than they did, there is nothing here for you.');
     if (o.kind === 'volume') return skip('Nothing to do. Heavy trading means this price is probably fair. Useful for picking markets to watch, not for betting.');
@@ -107,7 +109,19 @@
     }
     return skip('No rule for this signal yet.');
   }
+  // Spread capture: rest a bid 1¢ above the best bid and an offer 1¢ below the best offer. Both filling keeps the gap between them
+  // (less any maker fees); while resting, each pair holds about $1 minus the gap. Sized to 2% of the bankroll, at most 50 a side.
+  function spreadPlan(o, settings) {
+    const B = Math.max(50, (settings && settings.bankroll) || 500), share = 0.02;
+    const bid = Math.round((o.yb + 0.01) * 100) / 100, ask = Math.round((o.ya - 0.01) * 100) / 100;
+    const gap = Math.max(0, Math.round((ask - bid) * 10000) / 10000), perPair = bid + (1 - ask);
+    const n = gap > 0 ? Math.max(0, Math.min(50, Math.floor((B * share) / Math.max(0.05, perPair)))) : 0;
+    const fee = o.makerRate ? o.makerRate * (bid * (1 - bid) + ask * (1 - ask)) : 0;
+    const keepPer = Math.max(0, gap - fee);
+    return { bid, ask, gap, n, share, perPair, capital: n * perPair, keepPer, keep: n * keepPer, rank: keepPer * Math.log10(10 + (o.vol24 || 0)) };
+  }
   const P = {
+    spreadPlan: spreadPlan,
     GLOSSARY: GLOSSARY,
     KIND_PLAIN: KIND_PLAIN,
     KIND_DO: KIND_DO,

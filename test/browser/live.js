@@ -50,7 +50,13 @@ function respond(url) {
     if (sub === 'positions') return { market_positions: DESK.positions, event_positions: [] };
     if (sub === 'orders') return { orders: DESK.orders };
     if (sub === 'fills') return { fills: [] };
-    if (sub === 'order' && lastInit.method === 'POST') { DESK.lastOrder = JSON.parse(lastInit.body); return { ok: true, sent: DESK.lastOrder, result: { order_id: 'ord-1', fill_count: String(DESK.lastOrder.count) + '.00', remaining_count: '0.00', average_fill_price: String(DESK.lastOrder.limit), ts_ms: 1 } }; }
+    if (sub === 'book' && lastInit.method === 'POST') {
+      const b = DESK.lastBook = JSON.parse(lastInit.body);
+      if (DESK.bookGone) return { __status: 409, error: 'the lock is gone: one set costs 101.2¢ with fees and pays 100¢', gone: true, plan: { sets: 0, reason: 'one set costs 101.2¢ with fees and pays 100¢' } };
+      const per = b.side === 'no' ? b.tickers.length - 1 : 1;
+      return { ok: true, side: b.side, sets: 9, planned: 10, payout: 9 * per, cost: 8.4, fees: 0.3, locked: 9 * per - 8.7, unwindPnl: -0.04, unhedged: 0, legs: b.tickers.map((t, i) => ({ ticker: t, limit: 0.2, avg: 0.2, filled: i === 0 ? 11 : 9, extra: i === 0 ? 2 : 0, sold: i === 0 ? 2 : 0, soldAt: i === 0 ? 0.18 : null, error: '', unwindError: '' })) };
+    }
+    if (sub === 'order' && lastInit.method === 'POST') { DESK.lastOrder = JSON.parse(lastInit.body); (DESK.sentOrders = DESK.sentOrders || []).push(DESK.lastOrder); return { ok: true, sent: DESK.lastOrder, result: { order_id: 'ord-1', fill_count: String(DESK.lastOrder.count) + '.00', remaining_count: '0.00', average_fill_price: String(DESK.lastOrder.limit), ts_ms: 1 } }; }
     if (sub.startsWith('order/') && lastInit.method === 'DELETE') { DESK.cancelled = sub.slice(6); DESK.orders = []; return { ok: true, result: { order_id: sub.slice(6), reduced_by: '5.00' } }; }
     return { __status: 404, error: 'nope' };
   }
@@ -161,6 +167,38 @@ const assert = (cond, msg) => { if (!cond) { errors.push('ASSERT: ' + msg); cons
   $('acct-pw').value = 'pw123'; window.document.querySelector('[data-act="unlock"]').click(); await sleep(300);
   assert(Acct.st.unlocked && Acct.st.limits.contracts === 50, 'unlock succeeds and stores limits');
   assert(window.localStorage.getItem('edgedesk.deskpw') === 'pw123', 'password remembered on device');
+  // --- Money: a real lock through /desk/book and a real two-sided quote through /desk/order
+  UI.nav('money'); await sleep(200);
+  assert($('money-locks').querySelectorAll('.card.money').length >= 1 && /Locks now/.test($('money-tiles').textContent), 'Money lists locks on live data');
+  await sleep(600);
+  assert(calls.some(c => /\/trade-api\/v2\/markets\/[^/]+\/orderbook/.test(c)), 'live check reads the order books through the relay');
+  const realBtn = $('money-locks').querySelector('[data-act="mreal"]');
+  assert(!!realBtn, 'unlocked account shows "Buy it for real"');
+  const lockKey = realBtn.dataset.k, lockCard = () => Array.from($('money-locks').querySelectorAll('.card.money')).find(c => c.dataset.mk === lockKey);
+  realBtn.click(); await sleep(500);
+  assert(/Real money/.test(lockCard().textContent) && !!lockCard().querySelector('[data-act="mlockgo"]'), 'confirm panel explains the real buy (' + lockCard().querySelector('.money-real').textContent.slice(0, 80) + ')');
+  lockCard().querySelector('[data-act="mlockgo"]').click(); await sleep(400);
+  const lb = DESK.lastBook;
+  assert(lb && lb.event && lb.tickers.length >= 2 && lb.maxSets >= 1 && lb.maxCost > 0 && lb.maxCost <= 25.0001 && (lb.side === 'yes' || lb.side === 'no'), 'book request carries event, legs, side and a budget of 10% of the $250 cash (' + (lb && lb.maxCost) + ')');
+  assert(/Bought 9 complete sets for about/.test(lockCard().textContent) && /Sold back 2 extra on .* near 18¢/.test(lockCard().textContent), 'result reports the sets and the sell-back');
+  lockCard().querySelector('[data-act="mback"]').click(); await sleep(50);
+  DESK.bookGone = true; lockCard().querySelector('[data-act="mreal"]').click(); await sleep(500);
+  const go = lockCard().querySelector('[data-act="mlockgo"]'); if (go) { go.click(); await sleep(400); }
+  assert(/Not sent\.|Nothing to buy right now/.test(lockCard().textContent), 'a lock that vanished is reported, not bought');
+  DESK.bookGone = false;
+  const qBtn = $('money-spreads').querySelector('[data-act="mreal"]');
+  assert(!!qBtn, 'spreads offer "Quote it for real"');
+  const qKey = qBtn.dataset.k, qCard = () => Array.from($('money-spreads').querySelectorAll('.card.money')).find(c => c.dataset.mk === qKey);
+  qBtn.click(); await sleep(100);
+  assert(/post-only/.test(qCard().textContent) && !!qCard().querySelector('[data-act="mquotego"]'), 'spread confirm explains both resting orders');
+  DESK.sentOrders = [];
+  qCard().querySelector('[data-act="mquotego"]').click(); await sleep(500);
+  const so = DESK.sentOrders, sop = S.scanner.ops.find(x => UI.opKey(x) === qKey);
+  assert(so.length === 2 && so[0].side === 'yes' && so[0].action === 'buy' && so[0].tif === 'gtc' && so[0].postOnly === true && so[1].side === 'no' && so[1].action === 'buy' && so[1].tif === 'gtc' && so[1].postOnly === true, 'two post-only resting orders: a YES bid and a NO bid for the offer');
+  assert(Math.abs(so[0].limit - (sop.yb + 0.01)) < 1e-6 && Math.abs((1 - so[1].limit) - (sop.ya - 0.01)) < 1e-6 && so[0].count === so[1].count && so[0].count >= 1, 'each 1¢ inside its side of the spread, same size (' + so[0].limit + ' / ' + (1 - so[1].limit).toFixed(2) + ' × ' + so[0].count + ')');
+  assert(/Both orders are resting/.test(qCard().textContent), 'spread result panel');
+  UI.nav('scanner'); await sleep(100);
+  assert(/lock(s)? right now/.test($('scanner-banner').textContent) && !!$('scanner-banner').querySelector('[data-v="money"]'), 'the Scanner points at Money when locks exist');
   await sleep(100);
   assert($('desk-live').textContent.includes('$250.00') && $('desk-live').textContent.includes('Resting orders'), 'live panel shows balance (' + ($('desk-live').textContent.includes('$250.00')) + ')');
   assert(Acct.st.positions.length === 1 && Acct.st.positions[0].qty === 8 && Acct.st.positions[0].side === 'yes', 'positions parsed from fp fields');

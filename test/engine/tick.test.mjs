@@ -59,7 +59,7 @@ test('engine lifecycle', async (t) => {
     const before = w.orders.length;
     const s = await d.tick('alarm');
     assert.equal(w.oddsCalls, 1, 'no new odds fetch'); assert.match(s.odds.NFL, /cached/);
-    assert.equal(w.orders.length, before, 'no new orders'); assert.equal(s.cancels, 0);
+    assert.equal(w.orders.length, before + 1, 'exactly one new order'); assert.equal(w.orders[w.orders.length - 1].side, 'ask', 'and it is the reduce-only ask on the contracts bought a minute ago'); assert.equal(s.cancels, 0);
     const plan = JSON.parse(game(d, w.EV1).plan); assert.ok(plan.some(p => /already bought at this line/.test(p.text)), 'taker throttle explained in the plan');
   });
   await t.test('stale lines: feed down for 16 minutes → quotes pulled, no new orders, game marked stale', async () => {
@@ -93,14 +93,21 @@ test('engine lifecycle', async (t) => {
     assert.equal(game(d, w.EV1).status, 'active'); assert.equal(d.kv('odds_force_NFL'), null);
     assert.ok(Math.abs(game(d, w.EV1).anchor_home - 0.575) < 1e-9, 'anchor reset to the new mid');
   });
-  await t.test('credit scheduler: few credits left → daily budget, then cached lines; far games fetch nothing', async () => {
+  await t.test('credit scheduler: few credits left → cadence stretched to fit the month; far games fetch nothing; started games stop fetching', async () => {
     const d2 = new EngineDO(fakeState(), env()); const w2 = world(ck.get()); installFetch(w2); setLine(w2, 1.75, 2.25, 1.72, 2.28);
-    w2.oddsRemaining = '100'; // → 4 fetches a day
+    w2.oddsRemaining = '100'; // → 4 fetches a day → one every 6 hours for a single sport
     d2.saveSettings({ enabled: true });
-    for (let i = 0; i < 4; i++) { freshen(w2, ck.get()); await d2.tick('alarm'); ck.add(6 * MIN); }
-    assert.equal(w2.oddsCalls, 4);
-    const s = await d2.tick('alarm');
-    assert.equal(w2.oddsCalls, 4, 'fifth fetch withheld'); assert.match(s.odds.NFL, /credit budget/); assert.equal(s.oddsBudget.daily, 4);
+    let s = await d2.tick('alarm'); assert.equal(w2.oddsCalls, 1); assert.equal(s.oddsBudget.daily, 4);
+    ck.add(6 * MIN); freshen(w2, ck.get()); s = await d2.tick('alarm');
+    assert.equal(w2.oddsCalls, 1, 'no refetch six minutes later'); assert.equal(s.oddsCadenceSec, 21600); assert.match(s.odds.NFL, /cached/);
+    assert.equal(game(d2, w2.EV1).status, 'active', 'six-minute-old lines are still fine');
+    ck.add(10 * MIN); freshen(w2, ck.get()); s = await d2.tick('alarm');
+    assert.equal(w2.oddsCalls, 1); assert.equal(game(d2, w2.EV1).status, 'stale', 'with lines older than 15 min the engine stops trading rather than guessing');
+    ck.add(6 * 3600000); freshen(w2, ck.get()); w2.setKick(ck.get() + 2 * 3600000); s = await d2.tick('alarm');
+    assert.equal(w2.oddsCalls, 2, 'fetches again once the paced interval has passed'); assert.match(s.odds.NFL, /paced to every 21600s/);
+    // every game under way → no more line fetches for that sport
+    ck.set(w2.kick + 10 * MIN); freshen(w2, ck.get()); s = await d2.tick('alarm');
+    assert.equal(w2.oddsCalls, 2); assert.match(s.odds.NFL, /under way; lines not needed/);
     const wFar = world(ck.get(), 5 * 24 * 3600000); installFetch(wFar);
     const d3 = new EngineDO(fakeState(), env()); d3.saveSettings({ enabled: true });
     const s3 = await d3.tick('alarm');
@@ -158,6 +165,35 @@ test('engine lifecycle', async (t) => {
     const un = await post(d5, 'unbrake', { sport: 'NFL' }); assert.deepEqual(un.brakes, {});
     ck.add(MIN); freshen(w6, ck.get()); d5.kv('odds_force_NFL', true);
     const s3 = await d5.tick('alarm'); assert.ok(s3.taker + s3.maker > 0, 'trading resumes');
+    installFetch(w);
+  });
+  await t.test('exits: a reduce-only ask rests above fair on held contracts; when the bid clears fair + margin the position is sold and the books net out', async () => {
+    const d9 = new EngineDO(fakeState(), env()); const w10 = world(ck.get()); installFetch(w10); setLine(w10, 1.75, 2.25, 1.72, 2.28); freshen(w10, ck.get());
+    d9.saveSettings({ enabled: true });
+    let s = await d9.tick('alarm'); assert.equal(s.taker, 1); assert.ok(!w10.resting.some(o => o.action === 'sell'), 'nothing to sell on the tick that buys');
+    const N = rows(d9, "SELECT fill_count FROM bets WHERE kind='taker'")[0].fill_count; assert.ok(N >= 20, 'bought ' + N);
+    ck.add(MIN); freshen(w10, ck.get()); s = await d9.tick('alarm');
+    const ask = w10.resting.find(o => o.ticker === w10.EV1 + '-NE' && o.action === 'sell'); assert.ok(ask, 'reduce-only ask resting on the held contracts');
+    const sent = w10.orders.find(o => o.order_id === ask.order_id); assert.equal(sent.side, 'ask'); assert.equal(sent.reduce_only, true); assert.equal(sent.post_only, true);
+    assert.equal(Number(ask.remaining_count_fp), N, 'asks exactly what the engine holds'); assert.ok(Number(ask.yes_price_dollars) >= 0.44 && Number(ask.yes_price_dollars) <= 0.47, 'ask at fair + margin + fee (' + ask.yes_price_dollars + ')');
+    const askRow = rows(d9, "SELECT * FROM bets WHERE action='sell'")[0]; assert.equal(askRow.kind, 'exit_maker'); assert.equal(askRow.status, 'resting');
+    assert.ok(JSON.parse(game(d9, w10.EV1).plan).some(p => new RegExp('holding ' + N + '; placed ask').test(p.text)), 'plan explains the ask');
+    ck.add(MIN); freshen(w10, ck.get()); w10.quote(w10.EV1 + '-NE', 0.50, 0.52); // Kalshi overshoots while the lines are still cached
+    s = await d9.tick('alarm'); assert.equal(game(d9, w10.EV1).status, 'guarded', 'a 17¢ jump is first treated as news'); assert.ok(!w10.resting.some(o => o.action === 'sell'), 'ask pulled with the rest');
+    ck.add(MIN); freshen(w10, ck.get()); s = await d9.tick('alarm');
+    assert.equal(s.exits, 1, 'with fresh lines confirming fair value, the bid is taken');
+    const sold = rows(d9, "SELECT * FROM bets WHERE kind='exit'")[0]; assert.equal(sold.status, 'filled'); assert.equal(sold.fill_count, N); assert.equal(sold.price, 0.5); assert.equal(sold.action, 'sell');
+    assert.equal(w10.positions.find(p => p.ticker === w10.EV1 + '-NE'), undefined, 'exchange position closed');
+    assert.ok(JSON.parse(game(d9, w10.EV1).plan).some(p => new RegExp('sold ' + N + ' at 0.50').test(p.text)), 'plan explains the sale');
+    ck.add(MIN); freshen(w10, ck.get()); s = await d9.tick('alarm'); assert.equal(s.exits || 0, 0, 'nothing left to sell'); assert.equal(d9.engineHeld(w10.EV1 + '-NE'), 0);
+    // settlement: YES wins; the buy row and the sell row net to the locked profit
+    ck.set(w10.kick + 3 * 3600000); w10.results[w10.EV1 + '-NE'] = 'yes'; w10.results[w10.EV1 + '-BUF'] = 'no'; freshen(w10, ck.get());
+    s = await d9.tick('alarm');
+    const ne = rows(d9, "SELECT action, pnl, fee, fill_count, count FROM bets WHERE ticker=? AND status='settled'", w10.EV1 + '-NE');
+    assert.equal(ne.length, 2, 'buy and sell both settled');
+    const total = ne.reduce((a, r) => a + r.pnl, 0); const fees = ne.reduce((a, r) => a + (r.fee || 0) * r.fill_count / r.count, 0);
+    assert.ok(Math.abs(total - (N * 0.15 - fees)) < 1e-6, 'net P&L = ' + N + ' × (0.50 − 0.35) − fees (' + total.toFixed(2) + ')');
+    const st = await get(d9, 'status'); assert.equal(st.stats.exits.n, 1); assert.ok(st.stats.settled.every(r => r.kind !== 'exit'), 'calibration stats use buys only');
     installFetch(w);
   });
   await t.test('request budget: a tiny budget stops the tick early and says so', async () => {

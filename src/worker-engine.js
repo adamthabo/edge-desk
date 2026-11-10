@@ -24,7 +24,7 @@ const ENGINE_DEFAULTS = {
   bookmakers: 'pinnacle,lowvig,betonlineag,betfair_ex_eu,draftkings,fanduel,betmgm',
   oddsIntervalSec: 300, oddsIntervalNearSec: 120, ntfyTopic: '',
   // v2
-  devig: 'power', maxOddsAgeMin: 15, maxDisagree: 0.05, moveGuard: 0.03, staleBookMin: 20,
+  devig: 'power', maxOddsAgeMin: 15, maxDisagree: 0.05, moveGuard: 0.03, staleBookMin: 20, exitEnabled: true, exitMargin: 0.02,
   brakeMinBets: 20, brakeDays: 7, brakeClv: -0.005, trimMinBets: 30, digestHour: 9, timezone: 'America/New_York'
 };
 const SPORTS = {
@@ -168,7 +168,7 @@ class EngineDO {
     const add = (t, def) => { try { this.sql.exec('ALTER TABLE ' + t + ' ADD COLUMN ' + def); } catch (e) { /* exists */ } };
     add('games', 'plan TEXT');
     for (const d of ['conf REAL', 'disp REAL', 'line_age INTEGER', 'p_mult REAL', 'p_pow REAL', 'anchor_ts INTEGER', 'anchor_home REAL', 'anchor_away REAL', 'close_p_home REAL', 'close_p_away REAL', 'close_k_home REAL', 'close_k_away REAL', 'closed_ts INTEGER', 'conf_why TEXT']) add('games', d);
-    for (const d of ['sport TEXT', 'conf REAL', 'p_mult REAL', 'p_pow REAL', 'clv REAL', 'clv_mkt REAL']) add('bets', d);
+    for (const d of ['sport TEXT', 'conf REAL', 'p_mult REAL', 'p_pow REAL', 'clv REAL', 'clv_mkt REAL', 'action TEXT']) add('bets', d);
     this.sub = 0; this.subMax = Number(env.SUBREQ_BUDGET) || 45;
   }
   /* ---------- settings / log ---------- */
@@ -245,7 +245,7 @@ class EngineDO {
   brakes() { const b = this.kv('brakes') || {}; const now = Date.now(); let changed = false; for (const k in b) if (b[k].until <= now) { delete b[k]; changed = true; } if (changed) this.kv('brakes', b); return b; }
   // Sizing trim when the model has been worse calibrated than the market over enough settled bets.
   modelTrim(cfg) {
-    const r = this.sql.exec("SELECT COUNT(*) AS n, SUM((p_star - w) * (p_star - w)) AS bs, SUM((p_market - w) * (p_market - w)) AS bm FROM (SELECT p_star, p_market, CASE WHEN result = side THEN 1.0 ELSE 0.0 END AS w FROM bets WHERE status='settled' AND p_market IS NOT NULL)").toArray()[0];
+    const r = this.sql.exec("SELECT COUNT(*) AS n, SUM((p_star - w) * (p_star - w)) AS bs, SUM((p_market - w) * (p_market - w)) AS bm FROM (SELECT p_star, p_market, CASE WHEN result = side THEN 1.0 ELSE 0.0 END AS w FROM bets WHERE status='settled' AND p_market IS NOT NULL AND (action IS NULL OR action='buy'))").toArray()[0];
     if (!r || r.n < (cfg.trimMinBets || 30)) return { trim: 1, n: r ? r.n : 0 };
     const model = r.bs / r.n, market = r.bm / r.n;
     return { trim: model > market + 0.005 ? 0.5 : 1, n: r.n, model, market };
@@ -274,16 +274,16 @@ class EngineDO {
         const posRes = await this.kalshi(cfg, 'GET', '/portfolio/positions', { settlement_status: 'unsettled', count_filter: 'position', limit: '200' }, undefined, true);
         for (const p of posRes.market_positions || []) { const q = Number(p.position_fp !== undefined ? p.position_fp : (p.position || 0)); positions[p.ticker] = { qty: q, exposure: Number(p.market_exposure_dollars) || (Number(p.market_exposure) || 0) / 100 }; }
         const ordRes = await this.kalshi(cfg, 'GET', '/portfolio/orders', { status: 'resting', limit: '200' }, undefined, true);
-        resting = (ordRes.orders || []).map(o => ({ id: o.order_id, ticker: o.ticker, side: o.side, action: o.action, yes: Number(o.yes_price_dollars !== undefined ? o.yes_price_dollars : (o.yes_price || 0) / 100), remaining: Number(o.remaining_count_fp !== undefined ? o.remaining_count_fp : (o.remaining_count || 0)), client: o.client_order_id }));
+        resting = (ordRes.orders || []).map(o => ({ id: o.order_id, ticker: o.ticker, side: o.side === 'no' ? 'no' : 'yes', action: o.action || (o.side === 'ask' ? 'sell' : 'buy'), yes: Number(o.yes_price_dollars !== undefined ? o.yes_price_dollars : (o.yes_price || 0) / 100), remaining: Number(o.remaining_count_fp !== undefined ? o.remaining_count_fp : (o.remaining_count || 0)), client: o.client_order_id }));
       }
       const ourOrderIds = new Set(this.sql.exec("SELECT order_id FROM bets WHERE status IN ('resting','partial') AND order_id IS NOT NULL").toArray().map(r => r.order_id));
       // exposure across all unsettled positions (engine + manual): conservative
       let exposure = 0; for (const t in positions) exposure += positions[t].exposure;
-      for (const o of resting) exposure += o.remaining * (o.side === 'yes' ? o.yes : 1 - o.yes);
+      for (const o of resting) if (o.action !== 'sell') exposure += o.remaining * (o.side === 'yes' ? o.yes : 1 - o.yes);
       summary.cash = cash; summary.exposure = exposure;
       const brakes = this.brakes(); const trim = this.modelTrim(cfg); summary.trim = trim.trim;
       if (trim.trim < 1) summary.notes.push('sizing halved: the market has been better calibrated than the model over ' + trim.n + ' settled bets');
-      const pull = async (legTickers, why) => { for (const o of resting) if (legTickers.includes(o.ticker) && ourOrderIds.has(o.id) && !o.pulled) { await this.cancel(cfg, o, why); o.pulled = true; summary.cancels++; exposure -= o.remaining * (o.side === 'yes' ? o.yes : 1 - o.yes); } };
+      const pull = async (legTickers, why) => { for (const o of resting) if (legTickers.includes(o.ticker) && ourOrderIds.has(o.id) && !o.pulled) { await this.cancel(cfg, o, why); o.pulled = true; summary.cancels++; if (o.action !== 'sell') exposure -= o.remaining * (o.side === 'yes' ? o.yes : 1 - o.yes); } };
 
       // discover game markets per enabled sport; sports with the soonest games go first so the credit budget favours them
       const sportsOn = Object.keys(SPORTS).filter(s => cfg.sports[s]);
@@ -305,19 +305,26 @@ class EngineDO {
       summary.odds = summary.odds || {};
       const budget = oddsBudget(this.kv('odds_remaining'), this.oddsUsedToday()); let fetchesLeft = budget.left;
       summary.oddsBudget = { daily: budget.daily === Infinity ? null : budget.daily, usedToday: this.oddsUsedToday(), remaining: this.kv('odds_remaining') };
+      const horizonMs = (cfg.maxHoursAhead + 12) * 3600000; // event tickers carry a date, not a time: allow a half-day of slack
+      const activeSports = Math.max(1, discovered.filter(d => d.soonest !== null && d.soonest - now < horizonMs).length);
+      // pace the credits: the slowest cadence that still spends the whole month's budget evenly across the sports that need lines today
+      const pacedMs = budget.daily === Infinity ? 0 : Math.ceil(86400 / (budget.daily / activeSports)) * 1000;
+      summary.oddsCadenceSec = pacedMs ? Math.round(pacedMs / 1000) : null;
       for (const { sport, spec, byEvent, soonest } of discovered) {
         if (this.budgetLeft() < 6) { summary.notes.push('request budget reached before ' + sport + ' games; next minute'); break; }
-        // odds: fetch only when a game is inside the horizon, at the near/far cadence, within the credit budget; a move guard forces a refresh
+        // odds: fetch only when a game is inside the horizon and not yet under way, at the near/far cadence stretched to the credit budget; a move guard forces a refresh
         const oc = this.kv('odds_' + sport) || { at: 0, list: [] };
-        const inHorizon = soonest !== null && soonest - now < (cfg.maxHoursAhead + 12) * 3600000; // event tickers carry a date, not a time: allow a half-day of slack
+        const inHorizon = soonest !== null && soonest - now < horizonMs;
         const near = soonest !== null && soonest - now < 3 * 3600000;
-        const interval = (near ? cfg.oddsIntervalNearSec : cfg.oddsIntervalSec) * 1000;
+        const interval = Math.max((near ? cfg.oddsIntervalNearSec : cfg.oddsIntervalSec) * 1000, pacedMs);
         const force = !!this.kv('odds_force_' + sport);
+        const allStarted = oc.list.length > 0 && now - oc.at < 6 * 3600000 && oc.list.every(c => c.commence < now - 5 * 60000);
         if (!inHorizon) summary.odds[sport] = 'no games inside the horizon; lines not fetched';
+        else if (allStarted && !force) summary.odds[sport] = 'all ' + oc.list.length + ' games under way; lines not needed';
         else if (force || now - oc.at > interval) {
           if (fetchesLeft <= 0 && !force) summary.odds[sport] = 'credit budget for today used (' + budget.daily + '); lines ' + Math.round((now - oc.at) / 60000) + ' min old';
           else {
-            try { const raw = await this.fetchOdds(cfg, spec.odds); oc.list = consensus(raw, now, cfg); oc.at = now; oc.raw = raw.length; this.kv('odds_' + sport, oc); this.kv('odds_force_' + sport, null); fetchesLeft--; summary.odds[sport] = 'fetched ' + oc.list.length + ' events' + (force ? ' (forced by a move guard)' : ''); }
+            try { const raw = await this.fetchOdds(cfg, spec.odds); oc.list = consensus(raw, now, cfg); oc.at = now; oc.raw = raw.length; this.kv('odds_' + sport, oc); this.kv('odds_force_' + sport, null); fetchesLeft--; summary.odds[sport] = 'fetched ' + oc.list.length + ' events' + (force ? ' (forced by a move guard)' : '') + (pacedMs > (near ? cfg.oddsIntervalNearSec : cfg.oddsIntervalSec) * 1000 ? ' · paced to every ' + Math.round(interval / 1000) + 's by the credit budget' : ''); }
             catch (e) { summary.errors.push(sport + ' odds: ' + e.message); summary.odds[sport] = 'fetch failed; lines ' + (oc.at ? Math.round((now - oc.at) / 60000) + ' min old' : 'never loaded'); }
           }
         } else summary.odds[sport] = 'cached ' + Math.round((now - oc.at) / 1000) + 's ago (' + oc.list.length + ' events)';
@@ -384,7 +391,7 @@ class EngineDO {
           // cancel our resting orders on games we must not be quoting
           if (status !== 'active') { await pull(legTickers, status === 'guarded' ? 'move guard' : status === 'stale' ? 'stale lines' : status === 'disputed' ? 'books disagree' : status === 'braked' ? 'sport braked' : 'kickoff or horizon'); this.sql.exec("UPDATE games SET plan='[]' WHERE id=?", g.id); continue; }
           // per-game inventory
-          const gameExposure = legTickers.reduce((s, t) => s + ((positions[t] && positions[t].exposure) || 0), 0) + resting.filter(o => legTickers.includes(o.ticker) && !o.pulled).reduce((s, o) => s + o.remaining * (o.side === 'yes' ? o.yes : 1 - o.yes), 0);
+          const gameExposure = legTickers.reduce((s, t) => s + ((positions[t] && positions[t].exposure) || 0), 0) + resting.filter(o => legTickers.includes(o.ticker) && !o.pulled && o.action !== 'sell').reduce((s, o) => s + o.remaining * (o.side === 'yes' ? o.yes : 1 - o.yes), 0);
           const openGames = new Set(Object.keys(positions).map(t => t.replace(/-[A-Z0-9]+$/, ''))).size;
           const plan = [];
           const pnote = (team, text, extra) => plan.push(Object.assign({ team, text }, extra || {}));
@@ -400,6 +407,35 @@ class EngineDO {
             if (room < 1) { pnote(team, 'no room under the per-game or total exposure cap', base); continue; }
             if (openGames >= cfg.maxOpenGames && !positions[leg.ticker]) { pnote(team, 'max open games reached', base); continue; }
             if (this.budgetLeft() < 3) { pnote(team, 'request budget for this minute used; next minute', base); continue; }
+            // exits: sell what the engine holds when Kalshi now pays more than fair value (fill-or-cancel), otherwise rest a reduce-only ask above fair
+            const held = this.engineHeld(leg.ticker);
+            const sellable = Math.min(held, (positions[leg.ticker] && positions[leg.ticker].qty) || 0);
+            if (cfg.exitEnabled && sellable >= 1) {
+              const exitFee1 = feeFor(1, P.bid, 'taker', feeInfo);
+              const mineAsks = resting.filter(o => o.ticker === leg.ticker && o.action === 'sell' && ourOrderIds.has(o.id) && !o.pulled);
+              if (P.bid > 0 && P.bid - exitFee1 >= pStar + cfg.exitMargin - 1e-9) {
+                for (const o of mineAsks) { await this.cancel(cfg, o, 'taking the bid instead'); o.pulled = true; summary.cancels++; }
+                const count = Math.min(sellable, Math.floor(P.bidSize || sellable));
+                if (count >= 1) {
+                  const r = await this.place(cfg, { ticker: leg.ticker, team, side: 'yes', action: 'sell', count, limit: P.bid, tif: 'ioc', kind: 'exit', pSharp, pMarket: mid, pStar, edge: P.bid - exitFee1 - pStar, gameId: g.id, fee: feeFor(count, P.bid, 'taker', feeInfo), sport, conf: cf.conf, pMult: pM, pPow: pP });
+                  if (r) { summary.exits = (summary.exits || 0) + 1; }
+                  pnote(team, 'sold ' + count + ' at ' + P.bid.toFixed(2) + ': Kalshi now pays ' + ((P.bid - exitFee1 - pStar) * 100).toFixed(1) + '¢ over fair, so the profit is taken rather than waited for', base);
+                }
+              } else if (cfg.makerEnabled) {
+                const askFee1 = feeFor(1, Math.min(0.99, pStar + cfg.makerMargin), 'maker', feeInfo);
+                let wantAsk = Math.round(Math.ceil((pStar + cfg.makerMargin + askFee1) * 100 - 1e-9)) / 100;
+                if (wantAsk <= P.bid + 1e-9) wantAsk = Math.round((P.bid + 0.01) * 100) / 100; // never cross as a maker
+                if (wantAsk <= 0.99) {
+                  const keepAsk = mineAsks.find(o => Math.abs(o.yes - wantAsk) < 0.005);
+                  for (const o of mineAsks) if (o !== keepAsk) { await this.cancel(cfg, o, 'requote ask'); o.pulled = true; summary.cancels++; }
+                  if (keepAsk) pnote(team, 'holding ' + sellable + '; ask resting at ' + wantAsk.toFixed(2) + ' to sell above fair ' + pStar.toFixed(2), base);
+                  else {
+                    const r = await this.place(cfg, { ticker: leg.ticker, team, side: 'yes', action: 'sell', count: sellable, limit: wantAsk, tif: 'gtc', postOnly: true, kind: 'exit_maker', pSharp, pMarket: mid, pStar, edge: wantAsk - askFee1 - pStar, gameId: g.id, fee: feeFor(sellable, wantAsk, 'maker', feeInfo), sport, conf: cf.conf, pMult: pM, pPow: pP });
+                    if (r) { summary.maker++; pnote(team, 'holding ' + sellable + '; placed ask ' + sellable + ' at ' + wantAsk.toFixed(2) + ' to sell above fair ' + pStar.toFixed(2), base); }
+                  }
+                }
+              }
+            }
             // taker: buy YES on this leg when the ask is cheap vs p*; add to a position only once the lines have been refreshed since the last buy
             if (cfg.takerEnabled && P.ask < 1 && P.ask > 0.02 && spread <= cfg.maxSpread + 1e-6) {
               const fee1 = feeFor(1, P.ask, 'taker', feeInfo);
@@ -468,11 +504,13 @@ class EngineDO {
       const filled = Number(r.fill_count || 0), remaining = Number(r.remaining_count || 0);
       const status = o.tif === 'gtc' ? (filled > 0 && remaining > 0 ? 'partial' : (filled > 0 ? 'filled' : 'resting')) : (filled > 0 ? 'filled' : 'cancelled');
       const avg = r.average_fill_price !== undefined && filled > 0 ? Number(r.average_fill_price) : o.limit;
-      this.sql.exec('INSERT INTO bets (id, ts, game_id, ticker, team, side, kind, count, price, fee, p_sharp, p_market, p_star, edge, order_id, status, fill_count, note, sport, conf, p_mult, p_pow) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        id, Date.now(), o.gameId, o.ticker, o.team, o.side, o.kind, o.count, avg, o.fee, o.pSharp, o.pMarket, o.pStar, o.edge, r.order_id || null, status, filled, o.tif, o.sport || null, o.conf === undefined ? null : o.conf, o.pMult === undefined ? null : o.pMult, o.pPow === undefined ? null : o.pPow);
+      const selling = o.action === 'sell';
+      this.sql.exec('INSERT INTO bets (id, ts, game_id, ticker, team, side, kind, count, price, fee, p_sharp, p_market, p_star, edge, order_id, status, fill_count, note, sport, conf, p_mult, p_pow, action) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        id, Date.now(), o.gameId, o.ticker, o.team, o.side, o.kind, o.count, avg, o.fee, o.pSharp, o.pMarket, o.pStar, o.edge, r.order_id || null, status, filled, o.tif, o.sport || null, o.conf === undefined ? null : o.conf, o.pMult === undefined ? null : o.pMult, o.pPow === undefined ? null : o.pPow, selling ? 'sell' : 'buy');
       this.sql.exec('INSERT INTO daily (day, bets, taker_bets) VALUES (?, 1, ?) ON CONFLICT(day) DO UPDATE SET bets = bets + 1, taker_bets = taker_bets + ?', todayKey(Date.now()), o.kind === 'taker' ? 1 : 0, o.kind === 'taker' ? 1 : 0);
-      this.log('info', (o.kind === 'taker' ? 'Took ' : 'Quoted ') + o.count + ' YES ' + o.ticker + ' @ ' + o.limit.toFixed(2) + ' (p*=' + o.pStar.toFixed(3) + ', sharp=' + o.pSharp.toFixed(3) + (o.conf !== undefined && o.conf < 1 ? ', conf ' + Math.round(o.conf * 100) + '%' : '') + ') → ' + status, { filled, remaining });
+      this.log('info', (selling ? (o.tif === 'ioc' ? 'Sold ' : 'Asked ') : (o.kind === 'taker' ? 'Took ' : 'Quoted ')) + o.count + ' YES ' + o.ticker + ' @ ' + o.limit.toFixed(2) + ' (p*=' + o.pStar.toFixed(3) + ', sharp=' + o.pSharp.toFixed(3) + (o.conf !== undefined && o.conf < 1 ? ', conf ' + Math.round(o.conf * 100) + '%' : '') + ') → ' + status, { filled, remaining });
       if (o.kind === 'taker' && filled > 0) await this.notify('Edge Desk: bought ' + filled + ' YES ' + o.team, o.ticker + ' at ' + avg.toFixed(2) + ' · fair ' + o.pStar.toFixed(2) + ' · edge ' + (o.edge * 100).toFixed(1) + '¢');
+      if (o.kind === 'exit' && filled > 0) await this.notify('Edge Desk: sold ' + filled + ' YES ' + o.team, o.ticker + ' at ' + avg.toFixed(2) + ' · fair ' + o.pStar.toFixed(2) + ' · ' + (o.edge * 100).toFixed(1) + '¢ over fair', 'moneybag');
       return r;
     } catch (e) { this.log('error', 'order failed ' + o.ticker, { error: e.message }); return null; }
   }
@@ -508,16 +546,23 @@ class EngineDO {
       const result = seen[b.ticker];
       if (result !== 'yes' && result !== 'no') continue;
       const won = result === b.side;
-      const pnl = b.fill_count * (won ? (1 - b.price) : -b.price) - (b.fee || 0) * (b.fill_count / Math.max(1, b.count));
+      const feePaid = (b.fee || 0) * (b.fill_count / Math.max(1, b.count));
+      // a sell books the difference between what it got and what the contract settled at; buys and sells on one ticker then sum to the position's true result
+      const pnl = b.action === 'sell' ? b.fill_count * (b.price - (won ? 1 : 0)) - feePaid : b.fill_count * (won ? (1 - b.price) : -b.price) - feePaid;
       this.sql.exec("UPDATE bets SET status='settled', result=?, pnl=?, settled_ts=? WHERE id=?", result, pnl, Date.now(), b.id);
       this.sql.exec('INSERT INTO daily (day, realized, fees, bets) VALUES (?, ?, ?, 0) ON CONFLICT(day) DO UPDATE SET realized = realized + ?, fees = fees + ?', todayKey(Date.now()), pnl, b.fee || 0, pnl, b.fee || 0);
       this.log('info', 'Settled ' + b.ticker + ' ' + result.toUpperCase() + ' → ' + (pnl >= 0 ? '+' : '') + pnl.toFixed(2));
     }
   }
+  // Contracts of a market the engine itself holds (its unsettled buys minus its unsettled sells); manual trades are not its to sell.
+  engineHeld(ticker) {
+    const r = this.sql.exec("SELECT SUM(CASE WHEN action='sell' THEN -fill_count ELSE fill_count END) AS q FROM bets WHERE ticker=? AND status IN ('filled','partial','resting') AND fill_count > 0", ticker).toArray()[0];
+    return Math.max(0, Number((r && r.q) || 0));
+  }
   // Closing-line value for every fill on a game whose closing line is recorded: fair close minus the price paid
   // (books), and Kalshi's last pre-kickoff mid minus the price paid (market). Positive means we beat the close.
   scoreClosed(gameId) {
-    const rows = this.sql.exec('SELECT b.id, b.ticker, b.price, g.home_ticker, g.close_p_home, g.close_p_away, g.close_k_home, g.close_k_away FROM bets b JOIN games g ON g.id = b.game_id WHERE g.closed_ts IS NOT NULL AND b.fill_count > 0 AND b.clv IS NULL' + (gameId ? ' AND b.game_id = ?' : ''), ...(gameId ? [gameId] : [])).toArray();
+    const rows = this.sql.exec('SELECT b.id, b.ticker, b.price, g.home_ticker, g.close_p_home, g.close_p_away, g.close_k_home, g.close_k_away FROM bets b JOIN games g ON g.id = b.game_id WHERE g.closed_ts IS NOT NULL AND b.fill_count > 0 AND b.clv IS NULL AND (b.action IS NULL OR b.action = \'buy\')' + (gameId ? ' AND b.game_id = ?' : ''), ...(gameId ? [gameId] : [])).toArray();
     for (const r of rows) {
       const isHome = r.ticker === r.home_ticker;
       const pc = isHome ? r.close_p_home : r.close_p_away, km = isHome ? r.close_k_home : r.close_k_away;
@@ -562,16 +607,17 @@ class EngineDO {
     return n;
   }
   stats() {
-    const settled = this.sql.exec("SELECT kind, COUNT(*) AS n, SUM(pnl) AS pnl, SUM(CASE WHEN result = side THEN 1 ELSE 0 END) AS wins, SUM((p_star - CASE WHEN result = side THEN 1 ELSE 0 END) * (p_star - CASE WHEN result = side THEN 1 ELSE 0 END)) AS brier_sum, SUM((p_market - CASE WHEN result = side THEN 1 ELSE 0 END) * (p_market - CASE WHEN result = side THEN 1 ELSE 0 END)) AS brier_mkt, SUM(fill_count * price) AS staked FROM bets WHERE status='settled' GROUP BY kind").toArray();
-    const methods = this.sql.exec("SELECT COUNT(*) AS n, SUM((p_mult - w) * (p_mult - w)) AS b_mult, SUM((p_pow - w) * (p_pow - w)) AS b_pow FROM (SELECT p_mult, p_pow, CASE WHEN result = side THEN 1.0 ELSE 0.0 END AS w FROM bets WHERE status='settled' AND p_mult IS NOT NULL AND p_pow IS NOT NULL)").toArray()[0];
-    const open = this.sql.exec("SELECT COUNT(*) AS n, SUM(fill_count * price) AS staked FROM bets WHERE status IN ('filled','partial')").toArray()[0];
+    const settled = this.sql.exec("SELECT kind, COUNT(*) AS n, SUM(pnl) AS pnl, SUM(CASE WHEN result = side THEN 1 ELSE 0 END) AS wins, SUM((p_star - CASE WHEN result = side THEN 1 ELSE 0 END) * (p_star - CASE WHEN result = side THEN 1 ELSE 0 END)) AS brier_sum, SUM((p_market - CASE WHEN result = side THEN 1 ELSE 0 END) * (p_market - CASE WHEN result = side THEN 1 ELSE 0 END)) AS brier_mkt, SUM(fill_count * price) AS staked FROM bets WHERE status='settled' AND (action IS NULL OR action='buy') GROUP BY kind").toArray();
+    const exits = this.sql.exec("SELECT COUNT(*) AS n, SUM(pnl) AS pnl, SUM(fill_count) AS contracts FROM bets WHERE status='settled' AND action='sell'").toArray()[0];
+    const methods = this.sql.exec("SELECT COUNT(*) AS n, SUM((p_mult - w) * (p_mult - w)) AS b_mult, SUM((p_pow - w) * (p_pow - w)) AS b_pow FROM (SELECT p_mult, p_pow, CASE WHEN result = side THEN 1.0 ELSE 0.0 END AS w FROM bets WHERE status='settled' AND p_mult IS NOT NULL AND p_pow IS NOT NULL AND (action IS NULL OR action='buy'))").toArray()[0];
+    const open = this.sql.exec("SELECT COUNT(*) AS n, SUM(CASE WHEN action='sell' THEN -fill_count * price ELSE fill_count * price END) AS staked FROM bets WHERE status IN ('filled','partial') AND fill_count > 0").toArray()[0];
     const resting = this.sql.exec("SELECT COUNT(*) AS n FROM bets WHERE status IN ('resting','partial')").toArray()[0];
     const days = this.sql.exec('SELECT * FROM daily ORDER BY day DESC LIMIT 30').toArray();
-    const clv = this.sql.exec('SELECT sport, kind, COUNT(*) AS n, AVG(clv) AS clv, AVG(clv_mkt) AS clv_mkt, SUM(CASE WHEN clv > 0 THEN 1 ELSE 0 END) AS beat FROM bets WHERE clv IS NOT NULL AND fill_count > 0 AND ts > ? GROUP BY sport, kind', Date.now() - 30 * DAY).toArray();
+    const clv = this.sql.exec("SELECT sport, kind, COUNT(*) AS n, AVG(clv) AS clv, AVG(clv_mkt) AS clv_mkt, SUM(CASE WHEN clv > 0 THEN 1 ELSE 0 END) AS beat FROM bets WHERE clv IS NOT NULL AND fill_count > 0 AND ts > ? AND (action IS NULL OR action='buy') GROUP BY sport, kind", Date.now() - 30 * DAY).toArray();
     const used = this.kv('odds_used'); const remaining = this.kv('odds_remaining');
     let runwayDays = null;
     if (remaining !== null && used && used.day === todayKey(Date.now()) && used.n > 0) { const hours = Math.max(1, (Date.now() - Date.parse(used.day + 'T00:00:00Z')) / 3600000); const perDay = used.n / hours * 24; runwayDays = perDay > 0 ? Math.round(remaining / perDay) : null; }
-    return { settled, methods, open, resting, days, clv, oddsRemaining: remaining, oddsUsedToday: this.oddsUsedToday(), oddsBudget: oddsBudget(remaining, this.oddsUsedToday()).daily, runwayDays, brakes: this.brakes(), trim: this.modelTrim(this.settings()) };
+    return { settled, exits, methods, open, resting, days, clv, oddsRemaining: remaining, oddsUsedToday: this.oddsUsedToday(), oddsBudget: oddsBudget(remaining, this.oddsUsedToday()).daily, runwayDays, brakes: this.brakes(), trim: this.modelTrim(this.settings()) };
   }
   async ensureAlarm() {
     const cfg = this.settings();

@@ -77,11 +77,18 @@ export function installFetch(w) {
       if (p.endsWith('/portfolio/events/orders') && method === 'POST') {
         const o = body; const id = 'ord-' + (w.orders.length + 1); w.orders.push(Object.assign({ order_id: id }, o));
         const m = w.market(o.ticker); const ask = Number(m.yes_ask_dollars), count = Number(o.count), price = Number(o.price);
+        const bid = Number(m.yes_bid_dollars);
         if (o.time_in_force === 'immediate_or_cancel') {
           if (o.side === 'bid' && price >= ask) { w.positions.push({ ticker: o.ticker, position_fp: o.count + '.00', market_exposure_dollars: (count * ask).toFixed(2) }); return json({ order_id: id, client_order_id: o.client_order_id, fill_count: String(count), remaining_count: '0', average_fill_price: ask.toFixed(2), average_fee_paid: '0.01', ts_ms: Date.now() }, 201); }
+          if (o.side === 'ask' && price <= bid) {
+            const pos = w.positions.find(p => p.ticker === o.ticker); const have = pos ? Number(pos.position_fp) : 0; const sold = Math.min(have, count);
+            if (sold <= 0) return json({ order_id: id, client_order_id: o.client_order_id, fill_count: '0', remaining_count: '0', ts_ms: Date.now() }, 201);
+            pos.position_fp = (have - sold).toFixed(2); if (have - sold <= 0) w.positions = w.positions.filter(p => p !== pos);
+            return json({ order_id: id, client_order_id: o.client_order_id, fill_count: String(sold), remaining_count: '0', average_fill_price: bid.toFixed(2), average_fee_paid: '0.01', ts_ms: Date.now() }, 201);
+          }
           return json({ order_id: id, client_order_id: o.client_order_id, fill_count: '0', remaining_count: '0', ts_ms: Date.now() }, 201);
         }
-        w.resting.push({ order_id: id, ticker: o.ticker, side: 'yes', action: 'buy', yes_price_dollars: price.toFixed(4), remaining_count_fp: count.toFixed(2), initial_count_fp: count.toFixed(2), status: 'resting', client_order_id: o.client_order_id });
+        w.resting.push({ order_id: id, ticker: o.ticker, side: 'yes', action: o.side === 'ask' ? 'sell' : 'buy', yes_price_dollars: price.toFixed(4), remaining_count_fp: count.toFixed(2), initial_count_fp: count.toFixed(2), status: 'resting', client_order_id: o.client_order_id });
         return json({ order_id: id, client_order_id: o.client_order_id, fill_count: '0', remaining_count: String(count), ts_ms: Date.now() }, 201);
       }
       if (/\/portfolio\/events\/orders\/[^/]+$/.test(p) && method === 'DELETE') { const id = p.split('/').pop(); const n = w.resting.length; w.resting = w.resting.filter(o => o.order_id !== id); return json({ order_id: id, reduced_by: String(n - w.resting.length) }); }

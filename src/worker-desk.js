@@ -124,7 +124,7 @@ function toV2Order(o, lim) {
     ticker: o.ticker, client_order_id: crypto.randomUUID(), side: bookSide, count: String(count), price: price.toFixed(2),
     time_in_force: tif, self_trade_prevention_type: 'taker_at_cross', exchange_index: -1, cancel_order_on_pause: true
   };
-  if (action === 'sell' && tif === 'immediate_or_cancel') body.reduce_only = true;
+  if (action === 'sell') body.reduce_only = true; // selling only ever closes what is held, never opens the other side
   if (o.postOnly && tif === 'good_till_canceled') body.post_only = true;
   return { body, risk, side, action, count, limit };
 }

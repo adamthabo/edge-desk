@@ -1,0 +1,7 @@
+{
+  "name": "edge-desk-browser-tests",
+  "private": true,
+  "description": "jsdom tests for the Edge Desk page (simulated mode and the live relay/account/engine code paths).",
+  "scripts": { "test": "node smoke.js && node live.js" },
+  "dependencies": { "jsdom": "^24.1.3" }
+}

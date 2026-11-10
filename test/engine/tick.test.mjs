@@ -1,0 +1,197 @@
+// Whole engine ticks against a fake exchange and sharp-lines feed, in process (needs Node 22+ for node:sqlite).
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { EngineDO } from '../unit/_load.mjs';
+import { fakeState, world, installFetch, env, clock } from './harness.mjs';
+
+const MIN = 60000;
+function setLine(w, buf, ne, bufDk, neDk) {
+  const e = w.odds[0];
+  e.bookmakers[0].markets[0].outcomes = [{ name: 'Buffalo Bills', price: buf }, { name: 'New England Patriots', price: ne }];
+  e.bookmakers[1].markets[0].outcomes = [{ name: 'Buffalo Bills', price: bufDk }, { name: 'New England Patriots', price: neDk }];
+}
+function freshen(w, now) { for (const e of w.odds) for (const b of e.bookmakers) b.markets[0].last_update = Math.floor(now / 1000); }
+const rows = (d, q, ...p) => d.sql.exec(q, ...p).toArray();
+const game = (d, id) => rows(d, 'SELECT * FROM games WHERE id=?', id)[0];
+const post = (d, path, body) => d.fetch(new Request('http://x/engine/' + path, { method: 'POST', body: JSON.stringify(body || {}) })).then(r => r.json());
+const get = (d, path) => d.fetch(new Request('http://x/engine/' + path)).then(r => r.json());
+
+test('engine lifecycle', async (t) => {
+  const T0 = Date.UTC(2026, 10, 15, 20, 0, 0); // a Sunday afternoon in the US
+  const ck = clock(T0);
+  const w = world(T0); installFetch(w);
+  const state = fakeState();
+  const d = new EngineDO(state, env());
+  setLine(w, 1.75, 2.25, 1.72, 2.28); // NE is a real favourite-ish dog: cheap at 35¢ on Kalshi
+
+  await t.test('off: a tick does nothing', async () => {
+    const s = await d.tick('alarm');
+    assert.equal(s.note, 'engine off'); assert.equal(w.requests.length, 0);
+  });
+  await t.test('toggle refuses without keys, accepts with them', async () => {
+    const noKeys = new EngineDO(fakeState(), env({ KALSHI_KEY_ID: '', KALSHI_PRIVATE_KEY: '' }));
+    const r = await post(noKeys, 'toggle', { enabled: true });
+    assert.match(r.error || '', /Kalshi API key/);
+    const ok = await post(d, 'toggle', { enabled: true });
+    assert.equal(ok.settings.enabled, true); assert.ok(state.alarm() !== null, 'alarm scheduled');
+  });
+  await t.test('first tick: takes the cheap dog, quotes the rest, journals probabilities and confidence', async () => {
+    const s = await d.tick('alarm');
+    assert.deepEqual(s.errors, []);
+    assert.equal(s.matched, 2); assert.equal(s.unmatched, 1);
+    assert.equal(s.taker, 1, 'one taker buy'); assert.ok(s.maker >= 2, 'maker bids on the fair legs (' + s.maker + ')');
+    assert.equal(w.oddsCalls, 1);
+    const ne = rows(d, "SELECT * FROM bets WHERE kind='taker'")[0];
+    assert.equal(ne.ticker, w.EV1 + '-NE'); assert.equal(ne.status, 'filled'); assert.equal(ne.price, 0.35);
+    assert.equal(ne.sport, 'NFL'); assert.equal(ne.conf, 1); assert.ok(ne.p_pow > 0.42 && ne.p_pow < 0.46, 'power p recorded (' + ne.p_pow + ')'); assert.ok(ne.p_mult > 0.42 && ne.p_mult < 0.46);
+    assert.ok(ne.p_star > 0.40 && ne.p_star > 0.35 + 0.016 + 0.02, 'edge beats fee + margin');
+    const g = game(d, w.EV1);
+    assert.equal(g.status, 'active'); assert.equal(g.conf, 1); assert.equal(g.books, 2); assert.ok(g.disp >= 0 && g.disp < 0.02); assert.ok(g.anchor_home > 0.6, 'anchor set to the Kalshi mid');
+    const g2 = game(d, w.EV2);
+    assert.equal(g2.conf, 0.75, 'single book → 75% confidence'); assert.match(g2.conf_why, /single book/);
+    const dal = rows(d, "SELECT * FROM bets WHERE ticker=?", w.EV2 + '-DAL')[0];
+    assert.ok(dal && dal.kind === 'maker' && dal.status === 'resting' && dal.conf === 0.75, 'DAL quote sized at 75%');
+    assert.ok(s.subrequests > 5 && s.subrequests < 20, 'subrequests counted (' + s.subrequests + ')');
+    assert.equal(s.oddsBudget.remaining, 19000);
+  });
+  await t.test('second tick inside the interval: lines cached, quotes kept, nothing duplicated', async () => {
+    ck.add(60 * 1000); freshen(w, ck.get());
+    const before = w.orders.length;
+    const s = await d.tick('alarm');
+    assert.equal(w.oddsCalls, 1, 'no new odds fetch'); assert.match(s.odds.NFL, /cached/);
+    assert.equal(w.orders.length, before, 'no new orders'); assert.equal(s.cancels, 0);
+    const plan = JSON.parse(game(d, w.EV1).plan); assert.ok(plan.some(p => /already bought at this line/.test(p.text)), 'taker throttle explained in the plan');
+  });
+  await t.test('stale lines: feed down for 16 minutes → quotes pulled, no new orders, game marked stale', async () => {
+    w.oddsStatus = 500; ck.add(16 * MIN);
+    const restingBefore = w.resting.length; assert.ok(restingBefore >= 2);
+    const s = await d.tick('alarm');
+    assert.ok(s.errors.some(e => /odds/.test(e)), 'fetch failure reported');
+    assert.equal(game(d, w.EV1).status, 'stale'); assert.match(game(d, w.EV1).note, /min old/);
+    assert.equal(w.resting.length, 0, 'all our quotes cancelled'); assert.ok(s.cancels >= 2);
+    assert.equal(w.orders.length, w.orders.length, 'no new orders placed');
+    const dal = rows(d, "SELECT status, note FROM bets WHERE ticker=?", w.EV2 + '-DAL')[0];
+    assert.equal(dal.status, 'cancelled'); assert.equal(dal.note, 'stale lines');
+  });
+  await t.test('feed back: lines refreshed, quotes return', async () => {
+    w.oddsStatus = 200; freshen(w, ck.get()); ck.add(MIN);
+    const s = await d.tick('alarm');
+    assert.equal(w.oddsCalls, 3, 'fetched again (one failed attempt in between)'); assert.equal(game(d, w.EV1).status, 'active');
+    assert.ok(w.resting.length >= 2, 'quotes back on the book'); assert.ok(s.maker >= 2);
+  });
+  await t.test('move guard: Kalshi jumps 4¢ since the lines were fetched → pull quotes, force a refresh, act next minute', async () => {
+    ck.add(90 * 1000);
+    w.quote(w.EV1 + '-BUF', 0.56, 0.59); // BUF drops 4¢ while the books (cached) say nothing
+    const s = await d.tick('alarm');
+    assert.equal(s.guarded, 1); assert.equal(game(d, w.EV1).status, 'guarded'); assert.match(game(d, w.EV1).note, /moved 4¢/);
+    assert.ok(!w.resting.some(o => o.ticker.startsWith(w.EV1)), 'our quotes on that game are gone');
+    assert.ok(w.resting.some(o => o.ticker.startsWith(w.EV2)), 'the other game keeps its quotes');
+    assert.equal(d.kv('odds_force_NFL'), true);
+    const calls = w.oddsCalls; ck.add(30 * 1000);
+    const s2 = await d.tick('alarm');
+    assert.equal(w.oddsCalls, calls + 1, 'forced refresh happened inside the normal interval'); assert.match(s2.odds.NFL, /forced/);
+    assert.equal(game(d, w.EV1).status, 'active'); assert.equal(d.kv('odds_force_NFL'), null);
+    assert.ok(Math.abs(game(d, w.EV1).anchor_home - 0.575) < 1e-9, 'anchor reset to the new mid');
+  });
+  await t.test('credit scheduler: few credits left → daily budget, then cached lines; far games fetch nothing', async () => {
+    const d2 = new EngineDO(fakeState(), env()); const w2 = world(ck.get()); installFetch(w2); setLine(w2, 1.75, 2.25, 1.72, 2.28);
+    w2.oddsRemaining = '100'; // → 4 fetches a day
+    d2.saveSettings({ enabled: true });
+    for (let i = 0; i < 4; i++) { freshen(w2, ck.get()); await d2.tick('alarm'); ck.add(6 * MIN); }
+    assert.equal(w2.oddsCalls, 4);
+    const s = await d2.tick('alarm');
+    assert.equal(w2.oddsCalls, 4, 'fifth fetch withheld'); assert.match(s.odds.NFL, /credit budget/); assert.equal(s.oddsBudget.daily, 4);
+    const wFar = world(ck.get(), 5 * 24 * 3600000); installFetch(wFar);
+    const d3 = new EngineDO(fakeState(), env()); d3.saveSettings({ enabled: true });
+    const s3 = await d3.tick('alarm');
+    assert.match(s3.odds.NFL, /no games inside the horizon/); assert.equal(wFar.oddsCalls, 0, 'no credit spent on a slate five days out');
+    assert.ok(rows(d3, "SELECT * FROM games WHERE note LIKE '%outside the trading horizon%'").length >= 1);
+    installFetch(w);
+  });
+  await t.test('closing line: last tick before kickoff records the close and scores fills; late fills scored later', async () => {
+    freshen(w, ck.get());
+    const d4 = new EngineDO(fakeState(), env()); const w4 = world(ck.get()); installFetch(w4); setLine(w4, 1.75, 2.25, 1.72, 2.28);
+    d4.saveSettings({ enabled: true });
+    let s = await d4.tick('alarm'); assert.equal(s.taker, 1);
+    // a resting BUF quote gets filled on the exchange before kickoff
+    const bufQuote = w4.resting.find(o => o.ticker === w4.EV1 + '-BUF'); assert.ok(bufQuote);
+    w4.resting = w4.resting.filter(o => o !== bufQuote);
+    w4.positions.push({ ticker: bufQuote.ticker, position_fp: bufQuote.initial_count_fp, market_exposure_dollars: (Number(bufQuote.initial_count_fp) * Number(bufQuote.yes_price_dollars)).toFixed(2) });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => { if (String(url).includes('/portfolio/orders/' + bufQuote.order_id)) return new Response(JSON.stringify({ order: { order_id: bufQuote.order_id, status: 'executed', fill_count_fp: bufQuote.initial_count_fp, yes_price_dollars: bufQuote.yes_price_dollars } })); return realFetch(url, init); };
+    ck.set(w4.kick - 90 * 1000); freshen(w4, ck.get()); // 90s to kickoff → inside preKickoffSec; lines refetched (near cadence)
+    s = await d4.tick('alarm');
+    const g = game(d4, w4.EV1);
+    assert.equal(g.status, 'live'); assert.ok(g.closed_ts > 0); assert.ok(g.close_p_home > 0.5 && g.close_p_away < 0.5);
+    assert.ok(Math.abs(g.close_k_away - 0.34) < 1e-9, 'Kalshi close mid recorded');
+    const ne = rows(d4, "SELECT * FROM bets WHERE ticker=? AND fill_count > 0", w4.EV1 + '-NE')[0];
+    assert.ok(ne.clv > 0.05 && ne.clv < 0.12, 'bought at 35¢, close ~44¢ → CLV ' + (ne.clv * 100).toFixed(1) + '¢');
+    assert.ok(Math.abs(ne.clv_mkt - (0.34 - 0.35)) < 1e-9, 'market CLV vs Kalshi mid −1¢');
+    const buf = rows(d4, "SELECT * FROM bets WHERE ticker=?", w4.EV1 + '-BUF')[0];
+    assert.equal(buf.status, 'filled'); assert.ok(buf.clv !== null && buf.clv > 0, 'the maker fill learned about during reconcile is scored too (' + buf.clv + ')');
+    assert.ok(rows(d4, 'SELECT * FROM log').some(l => /Closing line/.test(l.msg)));
+    assert.ok(!w4.resting.some(o => o.ticker.startsWith(w4.EV1)), 'quotes pulled at kickoff');
+    globalThis.fetch = realFetch;
+    // the books drop the game after it starts: we keep what we knew
+    w4.odds = w4.odds.filter(e => e.id !== 'e1'); ck.add(3 * MIN); freshen(w4, ck.get()); d4.kv('odds_force_NFL', true);
+    s = await d4.tick('alarm');
+    const g2 = game(d4, w4.EV1); assert.equal(g2.status, 'live'); assert.equal(g2.close_p_home, g.close_p_home); assert.match(g2.note, /no longer publish/);
+    installFetch(w);
+  });
+  await t.test('brakes: negative closing-line value over enough fills pauses the sport; the user can resume', async () => {
+    const d5 = new EngineDO(fakeState(), env()); const w5 = world(ck.get()); installFetch(w5); setLine(w5, 1.75, 2.25, 1.72, 2.28);
+    d5.saveSettings({ enabled: true, brakeMinBets: 1 });
+    await d5.tick('alarm');
+    // pretend the NE buy was a bad one: price well above the close
+    d5.sql.exec("UPDATE bets SET price = 0.55 WHERE kind='taker'");
+    ck.set(w5.kick - 60 * 1000); freshen(w5, ck.get());
+    const s = await d5.tick('alarm');
+    const b = d5.brakes(); assert.ok(b.NFL, 'NFL braked'); assert.match(b.NFL.reason, /closing-line value -/);
+    assert.ok(w5.ntfy.length === 0, 'no ntfy without a topic');
+    const st = await get(d5, 'status'); assert.ok(st.stats.brakes.NFL && st.stats.clv.length >= 1);
+    // a new slate while braked: watched, not traded
+    const w6 = world(ck.get() + 60 * MIN); installFetch(w6); setLine(w6, 1.75, 2.25, 1.72, 2.28); for (const m of w6.markets) m.event_ticker += 'B', m.ticker = m.event_ticker + '-' + m.ticker.split('-').pop();
+    ck.add(10 * MIN); freshen(w6, ck.get()); d5.kv('odds_force_NFL', true);
+    const s2 = await d5.tick('alarm');
+    assert.equal(s2.taker + s2.maker, 0, 'no orders while braked');
+    assert.ok(rows(d5, "SELECT * FROM games WHERE status='braked'").length >= 1);
+    const un = await post(d5, 'unbrake', { sport: 'NFL' }); assert.deepEqual(un.brakes, {});
+    ck.add(MIN); freshen(w6, ck.get()); d5.kv('odds_force_NFL', true);
+    const s3 = await d5.tick('alarm'); assert.ok(s3.taker + s3.maker > 0, 'trading resumes');
+    installFetch(w);
+  });
+  await t.test('request budget: a tiny budget stops the tick early and says so', async () => {
+    const d6 = new EngineDO(fakeState(), env({ SUBREQ_BUDGET: '7' })); const w7 = world(ck.get()); installFetch(w7); setLine(w7, 1.75, 2.25, 1.72, 2.28);
+    d6.saveSettings({ enabled: true }); freshen(w7, ck.get());
+    const s = await d6.tick('alarm');
+    assert.ok(s.notes.some(n => /request budget/.test(n)), 'budget note: ' + JSON.stringify(s.notes)); assert.ok(s.subrequests <= 7);
+    installFetch(w);
+  });
+  await t.test('dry run without Kalshi keys evaluates the slate and touches no account route', async () => {
+    const d7 = new EngineDO(fakeState(), env({ KALSHI_KEY_ID: '', KALSHI_PRIVATE_KEY: '' })); const w8 = world(ck.get()); installFetch(w8); setLine(w8, 1.75, 2.25, 1.72, 2.28); freshen(w8, ck.get());
+    const r = await post(d7, 'preview', {});
+    assert.ok(r.ok, JSON.stringify(r)); const s = r.summary;
+    assert.deepEqual(s.errors, []); assert.equal(s.matched, 2); assert.ok(s.notes.some(n => /without Kalshi keys/.test(n)));
+    assert.ok(!w8.requests.some(q => q.path.includes('/portfolio/')), 'no account calls');
+    assert.equal(s.taker + s.maker, 0, 'a dry run places nothing');
+    const g = game(d7, w8.EV1); const plan = JSON.parse(g.plan); assert.ok(plan.length === 2 && plan.every(p => p.pStar > 0), 'plan written for both teams');
+    assert.equal(d7.settings().enabled, false, 'engine left off');
+    installFetch(w);
+  });
+  await t.test('daily digest goes out once a day after the digest hour when a topic is set', async () => {
+    const d8 = new EngineDO(fakeState(), env()); const w9 = world(ck.get()); installFetch(w9); setLine(w9, 1.75, 2.25, 1.72, 2.28); freshen(w9, ck.get());
+    d8.saveSettings({ enabled: true, ntfyTopic: 'adam-test', digestHour: 0 });
+    await d8.tick('alarm');
+    const digests = w9.ntfy.filter(n => /digest/.test(n.title));
+    assert.equal(digests.length, 1, 'one digest'); assert.match(digests[0].body, /Open:/); assert.equal(digests[0].topic, 'adam-test');
+    ck.add(MIN); freshen(w9, ck.get()); await d8.tick('alarm');
+    assert.equal(w9.ntfy.filter(n => /digest/.test(n.title)).length, 1, 'not repeated the same day');
+    installFetch(w);
+  });
+  await t.test('status carries health for the UI', async () => {
+    const st = await get(d, 'status');
+    assert.equal(st.health.oddsKey, true); assert.equal(st.health.kalshiKey, true); assert.ok(st.health.odds.NFL && st.health.odds.NFL.events === 2);
+    assert.ok(st.stats.trim && st.stats.trim.trim === 1); assert.equal(typeof st.stats.oddsBudget, 'number');
+  });
+  ck.restore();
+});

@@ -14,6 +14,10 @@ new_sqlite_classes = ["EngineDO"]
 [triggers]
 crons = ["* * * * *"]
 
+# Rebuild from src/ and run the unit tests before every deploy (wrangler runs this; a failing test blocks the deploy).
+[build]
+command = "bash build.sh"
+
 # Optional: lock the relay to copies that know a key, and/or to one origin.
 # [vars]
 # RELAY_KEY = "choose-a-secret"

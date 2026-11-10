@@ -1,0 +1,22 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build (runs the unit suite that also gates the Cloudflare deploy)
+        run: bash build.sh
+      - name: Committed build outputs match the sources
+        run: git diff --exit-code -- edge-desk.worker.js edge-desk.html artifact.html
+      - name: Engine lifecycle (fake exchange and lines feed, in process)
+        run: node --test 'test/engine/*.test.mjs'
+      - name: Page tests (jsdom)
+        working-directory: test/browser
+        run: npm ci && node smoke.js && node live.js

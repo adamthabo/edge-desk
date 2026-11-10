@@ -31,9 +31,23 @@ The private key never leaves the Worker: it signs each request there, and the ac
 
 Desk → Engine runs a "line anchor" strategy inside the Worker (a Durable Object with its own SQLite journal, woken every minute by a cron trigger): it matches Kalshi game markets to sharp sportsbook lines from the-odds-api.com, devigs them into fair probabilities, takes Kalshi's price when it is off by more than fees plus a margin, otherwise rests bids below fair value, pulls quotes before kickoff, holds to settlement, and journals every bet with the probability it believed (Brier score vs the market).
 
-- Add the secret `ODDS_API_KEY` (the-odds-api.com). Optional `NTFY_TOPIC` for push alerts via ntfy.sh.
+- Add the secret `ODDS_API_KEY` (the-odds-api.com; the 20k-credit plan covers continuous NFL + NBA + NHL polling, the free tier only a slow trial). Optional `NTFY_TOPIC` for push alerts and the daily digest via ntfy.sh.
 - Limits live in the Engine tab: bankroll, per-game and total exposure, daily loss stop (auto-off + cancel), margins, sports. The Worker's `MAX_ORDER_*` caps still apply to every order.
 - `wrangler.toml` declares the Durable Object binding, its SQLite migration and the cron trigger; deploying once with it is required before the Engine tab works.
+- A dry run works before any Kalshi key is set (it assumes an empty account), so you can see the plans first.
+
+### How it decides
+
+1. **Fair price.** Every bookmaker's two-way line is devigged with the power method (the margin lands mostly on the longshot, which is where sharp books put it; the multiplicative answer is kept alongside for comparison). Books are combined with weights (Pinnacle 3, other sharp books 2, retail 1). Within three hours of kickoff, a book whose line is much older than the freshest one is dropped. Fair value p* = 80% books + 20% Kalshi mid by default.
+2. **Confidence.** Full size needs a sharp book, at least two books, agreement within a couple of cents and a fresh line. No sharp book halves the size; books disagreeing by 2.5¢+ halves it; 5¢+ blocks the game; a sharp line older than 15 minutes near kickoff halves, 45 minutes blocks. Lines older than 15 minutes overall (feed down, credits out) stop all trading until refreshed and pull resting quotes.
+3. **Move guard.** If Kalshi has moved 3¢+ since the lines were fetched, the engine pulls its quotes on that game, forces a line refresh, and only acts on the next minute with fresh lines. A cheap price that appeared while the lines were stale is usually news, not an edge.
+4. **Sizing.** Quarter-Kelly on the configured bankroll, scaled by confidence, capped per game and in total; a taker position is only added to after the lines have been refreshed since the last buy; sizing is halved automatically while the engine's Brier score trails the market's over 30+ settled bets.
+5. **Closing-line value.** In the last minutes before kickoff the engine records the books' final fair value and Kalshi's last mid, then scores every fill: CLV = close − price paid. Positive CLV is the earliest honest sign of real edge; P&L needs hundreds of bets to mean anything. A sport whose trailing-30-day CLV is negative over 20+ fills is paused for a week (you can resume it from the Engine tab).
+6. **Budgets.** Sharp-lines credits are paced so the month's quota lasts (daily budget = remaining ÷ 31, soonest games first, nothing fetched for slates outside the trading horizon); each tick stays within a subrequest budget (`SUBREQ_BUDGET`, default 45) so a busy night cannot exceed the Worker's per-request limits. With an ntfy topic set, a daily digest goes out after 9am (your timezone, configurable).
+
+### Tests and the deploy gate
+
+`build.sh` rebuilds everything from `src/` and runs the dependency-free unit suite (`test/unit/`); `wrangler.toml` points its `[build]` hook at that script, so every Cloudflare deploy runs the tests first and a failure leaves the last good version live. `test/engine/` runs whole engine ticks in process against a fake exchange and lines feed (Node 22+), and `test/browser/` drives the page in jsdom; GitHub Actions runs all three on every push.
 
 ## What the relay does and does not do
 

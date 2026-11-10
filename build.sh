@@ -30,4 +30,6 @@ const tpl = fs.readFileSync("src/worker.js", "utf8").replace("__DESK__", () => f
 fs.writeFileSync("edge-desk.worker.js", tpl.replace("__PAGE__", () => JSON.stringify(page)));
 '
 node --check edge-desk.worker.js
-echo "built artifact.html, edge-desk.html ($(wc -c < edge-desk.html) bytes), edge-desk.worker.js ($(wc -c < edge-desk.worker.js) bytes)"
+# Dependency-free tests gate every build (Cloudflare runs this script before deploying; a failure keeps the last good version live).
+if [ "${SKIP_TESTS:-}" != "1" ]; then node --test 'test/unit/*.test.mjs' > /tmp/edge-desk-unit.log 2>&1 || { tail -40 /tmp/edge-desk-unit.log; echo "unit tests failed; build aborted"; exit 1; }; fi
+echo "built artifact.html, edge-desk.html ($(wc -c < edge-desk.html) bytes), edge-desk.worker.js ($(wc -c < edge-desk.worker.js) bytes)$( [ "${SKIP_TESTS:-}" = "1" ] && echo " (tests skipped)" || echo "; unit tests passed" )"

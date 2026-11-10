@@ -304,6 +304,14 @@ details.rules p { white-space: pre-wrap; font-size: 13px; color: var(--fg-2); li
 .decide-a { color: var(--fg-2); margin-top: 4px; padding-left: 26px; }
 .guide .layer-d { margin-top: 6px; }
 
+/* verdicts */
+.verdict { display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin-right: 4px; vertical-align: 1px; font-stretch: 90%; }
+.verdict.do { background: var(--up-soft); color: var(--up); }
+.verdict.maybe { background: var(--warn-soft); color: var(--warn); }
+.verdict.skip { background: var(--bg-sunk); color: var(--fg-2); }
+.layer.do-call { border-left-color: var(--up); }
+.boardread { font-size: 14px; color: var(--fg); padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev); margin: 0 0 12px; }
+
 /* real-money ticket */
 .realbox { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--down); border-radius: var(--radius); background: var(--down-soft); }
 .realbox .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

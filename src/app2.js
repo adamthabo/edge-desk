@@ -105,6 +105,10 @@
         const per = {}; shown = [];
         for (const o of ops) { per[o.kind] = (per[o.kind] || 0) + 1; if (per[o.kind] <= 6) shown.push(o); }
       } else shown = ops.filter(o => o.kind === S.scanner.kind);
+      // verdict order: Do it first, then Maybe, then Skip (stable within each)
+      const rank = { do: 0, maybe: 1, skip: 2 };
+      shown = shown.map((o, i) => ({ o, i, r: rank[P.verdict(o, S.settings).stance] })).sort((a, b) => (a.r - b.r) || (a.i - b.i)).map(x => x.o);
+      const read = $('scanner-read'); if (read) read.innerHTML = P.boardRead(shown, S.settings);
       const list = $('scanner-list');
       if (!shown.length) { list.innerHTML = '<div class="empty">' + (S.universe.markets.size ? 'No ' + (S.scanner.kind === 'all' ? 'signals' : KINDS[S.scanner.kind].toLowerCase() + ' signals') + ' in the loaded universe right now. Load more pages in Setup to widen the scan.' : 'Markets are loading. Signals appear here as soon as the first page arrives.') + '</div>'; }
       else list.innerHTML = shown.map(o => this.oppCard(o)).join('');
@@ -145,7 +149,8 @@
       const kp = P.KIND_PLAIN[o.kind];
       const kindTip = kp ? '<button type="button" class="kind ' + o.kind + ' kindbtn" data-kind-tip="' + o.kind + '" aria-label="What is ' + KINDS[o.kind] + '?">' + KINDS[o.kind] + ' <span aria-hidden="true">?</span></button>' : '<span class="kind ' + o.kind + '">' + KINDS[o.kind] + '</span>';
       const plainWhy = P.opPlain(o, S.universe.markets).replace(/^<div class="plain"><span class="plain-l">In plain terms<\/span>/, '').replace(/<\/div>$/, '');
-      const layered = P.on() ? P.layer(esc(P.opDo(o)), plainWhy + '<p class="note">' + esc(o.note) + '</p>', '<p>' + esc(o.math) + '</p>') : '<div class="math">' + esc(o.math) + '</div><div class="note">' + esc(o.note) + '</div>';
+      const v = P.verdict(o, S.settings);
+      const layered = P.on() ? P.layer(P.verdictHtml(v), plainWhy + '<p class="note">' + esc(o.note) + '</p>', '<p>' + esc(o.math) + '</p>', { label: 'My call' }) : '<div class="math">' + esc(o.math) + '</div><div class="note">' + esc(o.note) + '</div>';
       return '<div class="card opp" data-op="' + esc(this.opKey(o)) + '">' +
         '<div class="opp-head">' + kindTip + (cat ? '<span class="faint small">' + esc(cat) + '</span>' : '') + (m0 && m0.close ? '<span class="faint small" style="margin-left:auto">' + T('closes', 'closes') + ' ' + U.countdown(m0.close) + '</span>' : '') + '</div>' +
         '<div class="title">' + esc(o.title) + '</div>' +

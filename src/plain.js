@@ -65,10 +65,63 @@
     volume: () => 'Nothing to do by itself. Heavy trading means prices here are probably fair; use it to pick markets to watch.',
     longshot: (o) => 'A small NO bet at ' + U.cents(o.noPrice) + ' is defensible as part of many such bets, never as a single large one.'
   };
+  // My call: an opinionated verdict per signal, sized to the user's bankroll.
+  function verdictFor(o, settings) {
+    const B = Math.max(50, (settings && settings.bankroll) || 500);
+    const c = U.cents, m = U.money, pc = (v) => U.pct(v, 0);
+    const skip = (why) => ({ stance: 'skip', label: 'Skip', text: why });
+    const maybe = (text) => ({ stance: 'maybe', label: 'Maybe, small', text });
+    const doit = (text) => ({ stance: 'do', label: 'Do it', text });
+    if (o.kind === 'arb') {
+      const capDollars = B * 0.10;
+      const sets = Math.max(0, Math.min(Math.floor(o.size || 0), Math.floor(capDollars / Math.max(0.01, o.cost))));
+      const profit = sets * o.margin;
+      if (sets < 1) return skip('There is not enough size on the book for even one full set at these prices. Watch it; locks like this come and go.');
+      if (profit < 0.5) return skip('The whole lock is worth about ' + m(profit) + ' (' + sets + ' set' + (sets > 1 ? 's' : '') + ' × ' + c(o.margin) + '). That does not pay for the clicks, or for the risk that one leg fills and another does not.');
+      const side = o.sub === 'no' ? 'NO' : 'YES';
+      const text = 'Buy ' + side + ' on all ' + o.legs + ' outcomes, ' + sets + ' set' + (sets > 1 ? 's' : '') + ' (' + m(sets * o.cost) + '), fill-or-cancel, every leg within a few seconds. Locks about ' + m(profit) + (o.ann !== null ? ' (' + pc(o.ann) + ' annualized)' : '') + '.' + (o.sub === 'yes' ? ' Only because ' + (o.why || 'the list covers every possibility') + '; read the rules once before you do.' : ' If a leg does not fill, sell what did fill rather than hold a naked position.');
+      if (o.ann !== null && o.ann < 0.08) return maybe(text + ' The money is tied up a long time for that; do it only if you have nothing better for the cash.');
+      return doit(text);
+    }
+    if (o.kind === 'yield') {
+      const stake = B * 0.02;
+      const n = Math.floor(stake / o.cost);
+      const other = o.side === 'yes' ? 'NO' : 'YES';
+      if (o.ann < 0.15) return skip(pc(o.ann) + ' annualized is not enough pay for a ' + pc(1 - o.price) + ' chance of losing everything you put in.');
+      if (n < 1) return skip('At your bankroll even a 2% stake is less than one contract.');
+      return maybe('Only if you can say, in one sentence, why ' + other + ' is really a ' + pc(1 - o.price) + ' shot. If you can: buy ' + n + ' ' + o.side.toUpperCase() + ' at ' + c(o.price) + ' (' + m(n * o.cost) + ', 2% of bankroll). A miss costs all of it, so never more than that.');
+    }
+    if (o.kind === 'spread') {
+      const bid = o.yb + 0.01; const n = Math.floor((B * 0.01) / bid);
+      if (n < 1) return skip('Too small to matter at your bankroll. Do not cross a ' + c(o.spread) + ' spread for any reason.');
+      return maybe('Do not cross it. If you want this market, rest a bid for ' + n + ' YES at ' + c(bid) + ' (' + m(n * bid) + ', 1% of bankroll) and let the market come to you; cancel it if it has not filled by the close. Earn the spread, never pay it.');
+    }
+    if (o.kind === 'mover') return skip('A ' + c(Math.abs(o.delta)) + ' jump in a day means news, and the people who moved it already know it. Unless you can name the news and judge it better than they did, there is nothing here for you.');
+    if (o.kind === 'volume') return skip('Nothing to do. Heavy trading means this price is probably fair. Useful for picking markets to watch, not for betting.');
+    if (o.kind === 'longshot') {
+      const cost = o.noPrice + (o.fee || 0); const n = Math.floor((B * 0.005) / cost);
+      if (n < 1) return skip('Too small to matter at your bankroll; the edge on longshots is real on average but a few cents a contract.');
+      return maybe('Only as one of many such bets, never alone: NO at ' + c(o.noPrice) + ' for ' + n + ' contracts (' + m(n * cost) + ', half a percent of bankroll). You win ' + c(1 - cost) + ' per contract most of the time and lose ' + c(cost) + ' when the longshot hits, which wipes out many wins at once.');
+    }
+    return skip('No rule for this signal yet.');
+  }
   const P = {
     GLOSSARY: GLOSSARY,
     KIND_PLAIN: KIND_PLAIN,
     KIND_DO: KIND_DO,
+    verdict(o, settings) { return verdictFor(o, settings); },
+    verdictHtml(v) { return '<span class="verdict ' + v.stance + '">' + esc(v.label) + '</span> ' + esc(v.text); },
+    boardRead(ops, settings) {
+      if (!this.on() || !ops.length) return '';
+      let d = 0, mb = 0, sk = 0;
+      for (const o of ops) { const v = verdictFor(o, settings); if (v.stance === 'do') d++; else if (v.stance === 'maybe') mb++; else sk++; }
+      const parts = [];
+      parts.push(d ? '<b>' + d + '</b> worth doing' : 'nothing worth doing outright');
+      parts.push(mb ? '<b>' + mb + '</b> maybe, small' : '');
+      parts.push(sk ? '<b>' + sk + '</b> to skip' : '');
+      const line = 'My read of the board: ' + parts.filter(Boolean).join(', ') + '.' + (d ? ' The ones worth doing are at the top.' : ' Passing is a fine outcome; most days look like this.');
+      return '<div class="boardread">' + line + '</div>';
+    },
     // three-layer block: simple line, then "Why" and "The math" as expanders
     layer(simple, why, deep, opts) {
       opts = opts || {};
@@ -175,7 +228,7 @@
     },
     scannerPlain() {
       if (!this.on()) return '';
-      return this.hint('<p>Edge Desk watches the public prices of a few thousand Kalshi markets and flags six kinds of situations that experienced traders look for. Each card says what the numbers show, what has to be true for it to make money, and how it loses. None of it is a recommendation: the scanner reads prices, not news.</p>');
+      return this.hint('<p>Edge Desk watches the public prices of a few thousand Kalshi markets and flags six kinds of situations that experienced traders look for. Each card opens with <b>My call</b>: Do it, Maybe small, or Skip, with the exact action sized to your bankroll and the one reason that decides it. Open <i>Why</i> for the reasoning and <i>The math</i> for the numbers. The scanner reads prices, not news, so a call is a starting point for your judgment, not an order.</p>');
     },
     guideHtml() {
       if (window.EDLessons) return this.lessonsHtml();
